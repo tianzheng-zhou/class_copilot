@@ -29,3 +29,12 @@ data/
 *.wav
 *.pcm
 *.opus
+
+# Logs
+*.log
+
+# Sensitive / User Data
+vault.json
+*.salt
+settings.json
+recordings/
