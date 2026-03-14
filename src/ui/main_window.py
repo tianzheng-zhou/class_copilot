@@ -189,8 +189,8 @@ class MainWindow(QMainWindow):
                 self._course_combo.setCurrentText(course)
 
             # 检查 API Key
-            if not self._session_mgr.settings.has_api_key("iflytek_app_id"):
-                self._on_error("请先在设置中配置讯飞 API Key")
+            if not self._session_mgr.settings.has_api_key("dashscope_api_key"):
+                self._on_error("请先在设置中配置阿里云百炼 API Key")
                 self._show_settings()
                 return
 

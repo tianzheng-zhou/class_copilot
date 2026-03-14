@@ -71,9 +71,9 @@ class SpeakerDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "确认删除",
-            f"确定要删除「{speaker.course_name} - {speaker.name}」的声纹吗？",
+            f"确定要删除「{speaker.course_name} - {speaker.name}」的记录吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self._speaker_mgr.delete_teacher(speaker.id, speaker.feature_id or "")
+            self._speaker_mgr.delete_teacher(speaker.id)
             self._load_speakers()

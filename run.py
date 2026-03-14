@@ -9,7 +9,7 @@ ROOT = Path(__file__).parent
 
 def ensure_deps() -> None:
     """检查并安装缺失依赖。"""
-    required = ["PyQt6", "pyaudio", "websockets", "openai", "cryptography", "pynput", "winotify", "aiohttp"]
+    required = ["PyQt6", "pyaudio", "dashscope", "openai", "cryptography", "pynput", "winotify"]
     missing = []
     for pkg in required:
         try:

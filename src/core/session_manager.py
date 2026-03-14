@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Callable
 
 from src.asr.audio_capture import AudioCapture
-from src.asr.iflytek_client import IflytekASRClient, TranscriptResult
+from src.asr.dashscope_asr import TranscriptResult, create_asr_client
 from src.config.constants import LLM_MODEL_PLUS
 from src.config.settings import Settings
 from src.core.speaker_manager import SpeakerManager
@@ -57,7 +57,7 @@ class SessionManager:
         self._init_llm()
 
         # ASR 客户端
-        self._asr: IflytekASRClient | None = None
+        self._asr = None
         self._audio_capture: AudioCapture | None = None
 
         # 当前会话状态
@@ -159,26 +159,19 @@ class SessionManager:
 
     def _start_asr(self, course_name: str) -> None:
         """启动 ASR 连接。"""
-        app_id = self.settings.get_api_key(Settings.IFLYTEK_APP_ID)
-        key_id = self.settings.get_api_key(Settings.IFLYTEK_ACCESS_KEY_ID)
-        key_secret = self.settings.get_api_key(Settings.IFLYTEK_ACCESS_KEY_SECRET)
-
-        if not all([app_id, key_id, key_secret]):
+        api_key = self.settings.get_api_key(Settings.DASHSCOPE_API_KEY)
+        if not api_key:
             if self.on_error:
-                self.on_error("讯飞 API Key 未配置")
+                self.on_error("阿里云百炼 API Key 未配置")
             return
 
-        feature_ids = self.speaker_mgr.get_feature_ids(course_name)
-
-        self._asr = IflytekASRClient(
-            app_id=app_id,
-            access_key_id=key_id,
-            access_key_secret=key_secret,
+        self._asr = create_asr_client(
+            model=self.settings.asr_model,
+            api_key=api_key,
             on_result=self._on_asr_result,
             on_error=self._on_asr_error,
-            on_connected=lambda: logger.info("ASR 已连接"),
+            on_connected=lambda: logger.info("ASR [%s] 已连接", self.settings.asr_model),
             on_disconnected=self._on_asr_disconnected,
-            feature_ids=feature_ids,
         )
         self._asr.connect()
 
@@ -192,11 +185,9 @@ class SessionManager:
 
     def _on_asr_result(self, result: TranscriptResult) -> None:
         """ASR 转写结果回调。"""
-        speaker_role = self.speaker_mgr.get_speaker_role(result.speaker)
-
         segment = TranscriptSegment(
-            speaker_label=result.speaker,
-            speaker_role=speaker_role,
+            speaker_label="",
+            speaker_role=SpeakerRole.UNKNOWN,
             text=result.text,
             start_time_ms=result.start_ms,
             end_time_ms=result.end_ms,
@@ -342,10 +333,6 @@ class SessionManager:
         threading.Thread(target=_ask, daemon=True).start()
 
     # ── 声纹管理 ──
-
-    def register_teacher_voiceprint(self, name: str, course_name: str, audio_data: bytes) -> bool:
-        speaker = self.speaker_mgr.register_teacher(name, course_name, audio_data)
-        return speaker is not None
 
     def mark_current_speaker_as_teacher(self, speaker_label: str) -> None:
         self.speaker_mgr.mark_speaker_as_teacher(speaker_label)

@@ -11,6 +11,7 @@ from src.utils.crypto import KeyVault
 _DEFAULT_SETTINGS = {
     "microphone_index": -1,  # -1 = 系统默认
     "language": "zh",  # zh / en
+    "asr_model": "fun-asr-realtime",  # ASR 模型
     "answer_mode_concise": True,
     "answer_mode_detailed": True,
     "translation_enabled": True,
@@ -116,10 +117,9 @@ class Settings:
     def answer_mode_detailed(self) -> bool:
         return self._data.get("answer_mode_detailed", True)
 
-    # ── 讯飞 API Key 名称 ──
-    IFLYTEK_APP_ID = "iflytek_app_id"
-    IFLYTEK_ACCESS_KEY_ID = "iflytek_access_key_id"
-    IFLYTEK_ACCESS_KEY_SECRET = "iflytek_access_key_secret"
+    @property
+    def asr_model(self) -> str:
+        return self._data.get("asr_model", "fun-asr-realtime")
 
-    # ── 阿里云 API Key 名称 ──
+    # ── 阿里云百炼 API Key（ASR + LLM 共用）──
     DASHSCOPE_API_KEY = "dashscope_api_key"

@@ -12,17 +12,12 @@ AUDIO_CHUNK_BYTES = 1280  # 每 40ms 发送的字节数
 AUDIO_CHUNK_DURATION_MS = 40
 AUDIO_FORMAT_PCM = "pcm"
 
-# 讯飞 ASR
-IFLYTEK_ASR_WS_URL = "wss://office-api-ast-dx.iflyaisol.com/ast/communicate/v1"
-IFLYTEK_VOICEPRINT_BASE_URL = "https://office-api-ast-dx.iflyaisol.com"
-IFLYTEK_VOICEPRINT_REGISTER = "/res/feature/v1/register"
-IFLYTEK_VOICEPRINT_UPDATE = "/res/feature/v1/update"
-IFLYTEK_VOICEPRINT_DELETE = "/res/feature/v1/delete"
-
-# ASR 参数
-ASR_LANG = "autodialect"
-ASR_PD = "edu"
-ASR_ROLE_TYPE = 2  # 说话人分离
+# DashScope ASR（阿里云百炼语音识别）
+ASR_MODEL_DEFAULT = "fun-asr-realtime"
+ASR_MODEL_CHOICES = {
+    "fun-asr-realtime": "Fun-ASR（课堂/演讲优化，~1.19元/时）",
+    "qwen3-asr-flash-realtime": "千问3-ASR（多语种高精度+情感识别，~1.19元/时）",
+}
 
 # LLM 模型
 LLM_MODEL_FLASH = "qwen3.5-flash"

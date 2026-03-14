@@ -57,13 +57,9 @@ class App:
 
     def _check_first_run(self) -> None:
         """首次运行时弹出 API Key 配置。"""
-        needs_setup = (
-            not self.settings.has_api_key(Settings.IFLYTEK_APP_ID)
-            or not self.settings.has_api_key(Settings.DASHSCOPE_API_KEY)
-        )
-        if needs_setup:
+        if not self.settings.has_api_key(Settings.DASHSCOPE_API_KEY):
             dialog = SettingsDialog(self.settings, self.window)
-            dialog.setWindowTitle("首次配置 - 请输入 API Key")
+            dialog.setWindowTitle("首次配置 - 请输入阿里云百炼 API Key")
             dialog.exec()
             self.session_mgr.refresh_llm()
 

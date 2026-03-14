@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.asr.audio_capture import AudioCapture
+from src.config.constants import ASR_MODEL_CHOICES
 from src.config.settings import Settings
 
 
@@ -62,33 +63,20 @@ class SettingsDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        # 讯飞 ASR
-        asr_group = QGroupBox("科大讯飞 ASR")
-        asr_layout = QFormLayout(asr_group)
-
-        self._iflytek_app_id = QLineEdit()
-        self._iflytek_app_id.setEchoMode(QLineEdit.EchoMode.Password)
-        asr_layout.addRow("App ID:", self._iflytek_app_id)
-
-        self._iflytek_key_id = QLineEdit()
-        self._iflytek_key_id.setEchoMode(QLineEdit.EchoMode.Password)
-        asr_layout.addRow("Access Key ID:", self._iflytek_key_id)
-
-        self._iflytek_key_secret = QLineEdit()
-        self._iflytek_key_secret.setEchoMode(QLineEdit.EchoMode.Password)
-        asr_layout.addRow("Access Key Secret:", self._iflytek_key_secret)
-
-        layout.addWidget(asr_group)
-
-        # 阿里云 LLM
-        llm_group = QGroupBox("阿里云百炼 LLM")
-        llm_layout = QFormLayout(llm_group)
+        # 阿里云百炼（ASR + LLM 共用）
+        api_group = QGroupBox("阿里云百炼（语音识别 + 大模型）")
+        api_layout = QFormLayout(api_group)
 
         self._dashscope_key = QLineEdit()
         self._dashscope_key.setEchoMode(QLineEdit.EchoMode.Password)
-        llm_layout.addRow("API Key:", self._dashscope_key)
+        api_layout.addRow("API Key:", self._dashscope_key)
 
-        layout.addWidget(llm_group)
+        hint = QLabel("同一个 API Key 用于语音识别和大模型，获取方式：\n阿里云百炼控制台 → 右上角头像 → API-KEY 管理")
+        hint.setStyleSheet("color: #808080; font-size: 11px;")
+        hint.setWordWrap(True)
+        api_layout.addRow(hint)
+
+        layout.addWidget(api_group)
         layout.addStretch()
 
         return widget
@@ -102,6 +90,17 @@ class SettingsDialog(QDialog):
         for dev in AudioCapture.list_devices():
             self._mic_combo.addItem(dev["name"], dev["index"])
         layout.addRow("麦克风:", self._mic_combo)
+
+        # ASR 模型选择
+        self._asr_combo = QComboBox()
+        for model_id, label in ASR_MODEL_CHOICES.items():
+            self._asr_combo.addItem(label, model_id)
+        layout.addRow("语音识别模型:", self._asr_combo)
+
+        asr_hint = QLabel("切换模型后需重新开始课堂会话才会生效")
+        asr_hint.setStyleSheet("color: #808080; font-size: 11px;")
+        asr_hint.setWordWrap(True)
+        layout.addRow(asr_hint)
 
         return widget
 
@@ -148,13 +147,7 @@ class SettingsDialog(QDialog):
         return widget
 
     def _load_values(self) -> None:
-        # API Keys - 显示占位符
-        if self.settings.has_api_key(Settings.IFLYTEK_APP_ID):
-            self._iflytek_app_id.setPlaceholderText("已配置（留空保持不变）")
-        if self.settings.has_api_key(Settings.IFLYTEK_ACCESS_KEY_ID):
-            self._iflytek_key_id.setPlaceholderText("已配置（留空保持不变）")
-        if self.settings.has_api_key(Settings.IFLYTEK_ACCESS_KEY_SECRET):
-            self._iflytek_key_secret.setPlaceholderText("已配置（留空保持不变）")
+        # API Key - 显示占位符
         if self.settings.has_api_key(Settings.DASHSCOPE_API_KEY):
             self._dashscope_key.setPlaceholderText("已配置（留空保持不变）")
 
@@ -163,6 +156,13 @@ class SettingsDialog(QDialog):
         for i in range(self._mic_combo.count()):
             if self._mic_combo.itemData(i) == mic_idx:
                 self._mic_combo.setCurrentIndex(i)
+                break
+
+        # ASR 模型
+        asr_model = self.settings.asr_model
+        for i in range(self._asr_combo.count()):
+            if self._asr_combo.itemData(i) == asr_model:
+                self._asr_combo.setCurrentIndex(i)
                 break
 
         # 语言
@@ -184,18 +184,13 @@ class SettingsDialog(QDialog):
             self._storage_path.setText(path)
 
     def _save_and_close(self) -> None:
-        # 保存 API Keys（仅当用户输入了新值时）
-        if self._iflytek_app_id.text():
-            self.settings.set_api_key(Settings.IFLYTEK_APP_ID, self._iflytek_app_id.text())
-        if self._iflytek_key_id.text():
-            self.settings.set_api_key(Settings.IFLYTEK_ACCESS_KEY_ID, self._iflytek_key_id.text())
-        if self._iflytek_key_secret.text():
-            self.settings.set_api_key(Settings.IFLYTEK_ACCESS_KEY_SECRET, self._iflytek_key_secret.text())
+        # 保存 API Key（仅当用户输入了新值时）
         if self._dashscope_key.text():
             self.settings.set_api_key(Settings.DASHSCOPE_API_KEY, self._dashscope_key.text())
 
         # 保存通用设置
         self.settings.set("microphone_index", self._mic_combo.currentData())
+        self.settings.set("asr_model", self._asr_combo.currentData())
         self.settings.set("language", self._lang_combo.currentData())
         self.settings.set("answer_mode_concise", self._concise_check.isChecked())
         self.settings.set("answer_mode_detailed", self._detailed_check.isChecked())
