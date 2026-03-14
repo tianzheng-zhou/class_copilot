@@ -24,11 +24,12 @@ class TranscriptManager:
         self._segments.clear()
 
     def add_segment(self, seg: TranscriptSegment) -> TranscriptSegment:
-        """添加转写片段并持久化。"""
+        """添加转写片段，仅持久化最终结果。"""
         if self._current_session_id:
             seg.session_id = self._current_session_id
-        seg.id = self._db.add_segment(seg)
-        self._segments.append(seg)
+        if seg.is_final:
+            seg.id = self._db.add_segment(seg)
+            self._segments.append(seg)
         return seg
 
     def get_context_text(self, max_chars: int = 3000, teacher_only: bool = True) -> str:

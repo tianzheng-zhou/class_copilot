@@ -1,6 +1,10 @@
 """深色主题样式。"""
 
 DARK_THEME = """
+* {
+    outline: none;
+}
+
 QWidget {
     background-color: #1e1e1e;
     color: #d4d4d4;
@@ -39,7 +43,7 @@ QPushButton {
     background-color: #0e639c;
     color: white;
     border: none;
-    padding: 6px 16px;
+    padding: 4px 10px;
     border-radius: 3px;
     min-height: 24px;
 }
@@ -72,6 +76,11 @@ QPushButton#secondary_btn {
 
 QPushButton#secondary_btn:hover {
     background-color: #505050;
+}
+
+QPushButton#secondary_btn:checked {
+    background-color: #0e639c;
+    color: white;
 }
 
 /* 输入框 */

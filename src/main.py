@@ -14,6 +14,11 @@ logging.basicConfig(
 
 
 def main() -> None:
+    import os
+    # 优化 Windows 渲染性能，减少窗口闪烁
+    os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+    os.environ.setdefault("QSG_RENDER_LOOP", "basic")
+
     from src.app import App
     app = App()
     sys.exit(app.run())

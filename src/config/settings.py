@@ -11,7 +11,7 @@ from src.utils.crypto import KeyVault
 _DEFAULT_SETTINGS = {
     "microphone_index": -1,  # -1 = 系统默认
     "language": "zh",  # zh / en
-    "asr_model": "fun-asr-realtime",  # ASR 模型
+    "asr_model": "qwen3-asr-flash-realtime",  # ASR 模型
     "answer_mode_concise": True,
     "answer_mode_detailed": True,
     "translation_enabled": True,

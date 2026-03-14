@@ -2,3 +2,99 @@
 2026-03-14 18:21:33,108 [src.utils.hotkeys] INFO: 全局快捷键已启动
 2026-03-14 18:42:45,286 [src.utils.hotkeys] INFO: 全局快捷键已启动
 2026-03-14 18:43:55,710 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:03:06,354 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:03:37,060 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:06:12,038 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:11:25,726 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:22:34,407 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:23:08,882 [src.asr.dashscope_asr] INFO: Fun-ASR 已连接
+2026-03-14 19:23:08,882 [src.core.session_manager] INFO: ASR [fun-asr-realtime] 已连接
+2026-03-14 19:23:08,884 [src.asr.dashscope_asr] INFO: Fun-ASR [fun-asr-realtime] 启动成功
+2026-03-14 19:23:11,828 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:23:11,829 [src.core.session_manager] INFO: 课堂会话已开始: TEST-260314
+2026-03-14 19:23:17,732 [src.asr.audio_capture] INFO: 音频采集已停止
+2026-03-14 19:23:17,732 [src.asr.dashscope_asr] INFO: Fun-ASR 已断开
+2026-03-14 19:23:17,733 [src.asr.dashscope_asr] INFO: Fun-ASR 已停止
+2026-03-14 19:23:17,734 [src.core.session_manager] INFO: 课堂会话已停止
+2026-03-14 19:23:55,142 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:24:01,717 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:34:23,300 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:35:32,250 [src.asr.dashscope_asr] INFO: Fun-ASR 已连接
+2026-03-14 19:35:32,251 [src.core.session_manager] INFO: ASR [fun-asr-realtime] 已连接
+2026-03-14 19:35:32,251 [src.asr.dashscope_asr] INFO: Fun-ASR [fun-asr-realtime] 启动成功
+2026-03-14 19:35:32,501 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:35:32,501 [src.core.session_manager] INFO: 课堂会话已开始: test-260314
+2026-03-14 19:35:55,727 [src.asr.audio_capture] INFO: 音频采集已停止
+2026-03-14 19:35:55,728 [src.asr.dashscope_asr] INFO: Fun-ASR 已断开
+2026-03-14 19:35:55,728 [src.asr.dashscope_asr] INFO: Fun-ASR 已停止
+2026-03-14 19:35:55,729 [src.core.session_manager] INFO: 课堂会话已停止
+2026-03-14 19:36:38,036 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:36:46,782 [src.asr.dashscope_asr] INFO: Fun-ASR 已连接
+2026-03-14 19:36:46,782 [src.core.session_manager] INFO: ASR [fun-asr-realtime] 已连接
+2026-03-14 19:36:46,783 [src.asr.dashscope_asr] INFO: Fun-ASR [fun-asr-realtime] 启动成功
+2026-03-14 19:36:47,026 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:36:47,026 [src.core.session_manager] INFO: 课堂会话已开始: test260314
+2026-03-14 19:36:51,211 [src.asr.audio_capture] INFO: 音频采集已停止
+2026-03-14 19:36:51,211 [src.asr.dashscope_asr] INFO: Fun-ASR 已断开
+2026-03-14 19:36:51,211 [src.asr.dashscope_asr] INFO: Fun-ASR 已停止
+2026-03-14 19:36:51,212 [src.core.session_manager] INFO: 课堂会话已停止
+2026-03-14 19:37:43,101 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:37:49,879 [src.asr.dashscope_asr] INFO: Fun-ASR 已连接
+2026-03-14 19:37:49,880 [src.core.session_manager] INFO: ASR [fun-asr-realtime] 已连接
+2026-03-14 19:37:49,880 [src.asr.dashscope_asr] INFO: Fun-ASR [fun-asr-realtime] 启动成功
+2026-03-14 19:37:50,126 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:37:50,126 [src.core.session_manager] INFO: 课堂会话已开始: test260314
+2026-03-14 19:38:39,954 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:39:39,660 [src.asr.dashscope_asr] INFO: Fun-ASR 已连接
+2026-03-14 19:39:39,660 [src.core.session_manager] INFO: ASR [fun-asr-realtime] 已连接
+2026-03-14 19:39:39,660 [src.asr.dashscope_asr] INFO: Fun-ASR [fun-asr-realtime] 启动成功
+2026-03-14 19:39:39,914 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:39:39,915 [src.core.session_manager] INFO: 课堂会话已开始: test260314
+2026-03-14 19:40:45,380 [src.asr.audio_capture] INFO: 音频采集已停止
+2026-03-14 19:40:45,646 [src.asr.dashscope_asr] INFO: Fun-ASR 转写完成
+2026-03-14 19:40:45,680 [src.asr.dashscope_asr] INFO: Fun-ASR 已断开
+2026-03-14 19:40:45,680 [src.asr.dashscope_asr] INFO: Fun-ASR 已停止
+2026-03-14 19:40:45,681 [src.core.session_manager] INFO: 课堂会话已停止
+2026-03-14 19:41:00,084 [websocket] INFO: Websocket connected
+2026-03-14 19:41:00,085 [dashscope] INFO: [omni realtime] session created
+2026-03-14 19:41:00,157 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已连接
+2026-03-14 19:41:00,157 [src.core.session_manager] INFO: ASR [qwen3-asr-flash-realtime] 已连接
+2026-03-14 19:41:00,158 [src.asr.dashscope_asr] INFO: Qwen3-ASR [qwen3-asr-flash-realtime] 启动成功
+2026-03-14 19:41:00,328 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:41:00,329 [src.core.session_manager] INFO: 课堂会话已开始: test260314
+2026-03-14 19:41:25,353 [src.asr.audio_capture] INFO: 音频采集已停止
+2026-03-14 19:41:25,391 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已断开: code=None, msg=None
+2026-03-14 19:41:25,392 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已停止
+2026-03-14 19:41:25,393 [src.core.session_manager] INFO: 课堂会话已停止
+2026-03-14 19:46:59,675 [src.utils.hotkeys] INFO: 全局快捷键已启动
+2026-03-14 19:48:02,566 [websocket] INFO: Websocket connected
+2026-03-14 19:48:02,567 [dashscope] INFO: [omni realtime] session created
+2026-03-14 19:48:02,600 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已连接
+2026-03-14 19:48:02,600 [src.core.session_manager] INFO: ASR [qwen3-asr-flash-realtime] 已连接
+2026-03-14 19:48:02,600 [src.asr.dashscope_asr] INFO: Qwen3-ASR [qwen3-asr-flash-realtime] 启动成功
+2026-03-14 19:48:02,849 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:48:02,850 [src.core.session_manager] INFO: 课堂会话已开始: test-260314
+2026-03-14 19:52:43,825 [src.asr.audio_capture] INFO: 音频采集已停止
+2026-03-14 19:52:43,859 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已停止
+2026-03-14 19:52:43,860 [src.core.session_manager] INFO: 课堂会话已停止
+2026-03-14 19:52:53,032 [websocket] INFO: Websocket connected
+2026-03-14 19:52:53,033 [dashscope] INFO: [omni realtime] session created
+2026-03-14 19:52:53,091 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已连接
+2026-03-14 19:52:53,091 [src.core.session_manager] INFO: ASR [qwen3-asr-flash-realtime] 已连接
+2026-03-14 19:52:53,091 [src.asr.dashscope_asr] INFO: Qwen3-ASR [qwen3-asr-flash-realtime] 启动成功
+2026-03-14 19:52:53,257 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:52:53,258 [src.core.session_manager] INFO: 课堂会话已开始: test-260314
+2026-03-14 19:52:53,357 [src.asr.audio_capture] INFO: 音频采集已停止
+2026-03-14 19:52:53,390 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已断开: code=None, msg=None
+2026-03-14 19:52:53,391 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已停止
+2026-03-14 19:52:53,392 [src.core.session_manager] INFO: 课堂会话已停止
+2026-03-14 19:52:55,000 [websocket] INFO: Websocket connected
+2026-03-14 19:52:55,000 [dashscope] INFO: [omni realtime] session created
+2026-03-14 19:52:55,020 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已连接
+2026-03-14 19:52:55,020 [src.core.session_manager] INFO: ASR [qwen3-asr-flash-realtime] 已连接
+2026-03-14 19:52:55,020 [src.asr.dashscope_asr] INFO: Qwen3-ASR [qwen3-asr-flash-realtime] 启动成功
+2026-03-14 19:52:55,186 [src.asr.audio_capture] INFO: 音频采集已启动
+2026-03-14 19:52:55,186 [src.core.session_manager] INFO: 课堂会话已开始: test-260314
+2026-03-14 19:53:05,713 [httpx] INFO: HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-14 19:53:05,722 [src.asr.dashscope_asr] INFO: Qwen3-ASR 已断开: code=None, msg=None
+2026-03-14 19:54:20,526 [httpx] INFO: HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"

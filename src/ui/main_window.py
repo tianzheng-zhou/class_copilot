@@ -57,10 +57,11 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self) -> None:
         self.setWindowTitle("听课助手")
+        self._stay_on_top = True
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
         )
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.setMinimumSize(300, 400)
         self.resize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT)
 
@@ -88,17 +89,19 @@ class MainWindow(QMainWindow):
         self._course_combo.setMinimumWidth(120)
         top_bar.addWidget(self._course_combo)
 
-        self._listen_btn = QPushButton("▶ 开始")
-        self._listen_btn.setFixedWidth(80)
+        self._listen_btn = QPushButton("开始")
+        self._listen_btn.setFixedWidth(70)
         self._listen_btn.clicked.connect(self._toggle_listen)
         top_bar.addWidget(self._listen_btn)
 
-        self._filter_btn = QPushButton("教师")
-        self._filter_btn.setObjectName("secondary_btn")
-        self._filter_btn.setFixedWidth(50)
-        self._filter_btn.setToolTip("LLM 输入过滤模式")
-        self._filter_btn.clicked.connect(self._toggle_filter)
-        top_bar.addWidget(self._filter_btn)
+        self._pin_btn = QPushButton("置顶")
+        self._pin_btn.setObjectName("secondary_btn")
+        self._pin_btn.setFixedWidth(60)
+        self._pin_btn.setToolTip("切换窗口是否始终置顶")
+        self._pin_btn.setCheckable(True)
+        self._pin_btn.setChecked(True)
+        self._pin_btn.clicked.connect(self._toggle_stay_on_top)
+        top_bar.addWidget(self._pin_btn)
 
         layout.addLayout(top_bar)
 
@@ -116,30 +119,30 @@ class MainWindow(QMainWindow):
 
         # 转写 Tab
         self._transcript_view = TranscriptView()
-        self._tabs.addTab(self._transcript_view, "📝 转写")
+        self._tabs.addTab(self._transcript_view, "转写")
 
         # 答案 Tab
         self._answer_view = AnswerView()
-        self._tabs.addTab(self._answer_view, "💡 答案")
+        self._tabs.addTab(self._answer_view, "答案")
 
         # 提问 Tab
         self._question_input = QuestionInput()
-        self._tabs.addTab(self._question_input, "🙋 提问")
+        self._tabs.addTab(self._question_input, "提问")
 
         layout.addWidget(self._tabs)
 
         # ── 底部菜单栏 ──
         bottom_bar = QHBoxLayout()
 
-        menu_btn = QPushButton("☰")
+        menu_btn = QPushButton("菜单")
         menu_btn.setObjectName("secondary_btn")
-        menu_btn.setFixedSize(32, 32)
+        menu_btn.setFixedSize(60, 32)
         menu_btn.clicked.connect(self._show_menu)
         bottom_bar.addWidget(menu_btn)
 
         bottom_bar.addStretch()
 
-        self._copy_btn = QPushButton("📋 复制答案")
+        self._copy_btn = QPushButton("复制答案")
         self._copy_btn.setObjectName("secondary_btn")
         self._copy_btn.clicked.connect(self._copy_latest_answer)
         bottom_bar.addWidget(self._copy_btn)
@@ -178,7 +181,7 @@ class MainWindow(QMainWindow):
     def _toggle_listen(self) -> None:
         if self._session_mgr.is_listening:
             self._session_mgr.stop_session()
-            self._listen_btn.setText("▶ 开始")
+            self._listen_btn.setText("开始")
             self._tray.set_listening(False)
         else:
             course = self._course_combo.currentText().strip()
@@ -196,13 +199,23 @@ class MainWindow(QMainWindow):
 
             success = self._session_mgr.start_session(course)
             if success:
-                self._listen_btn.setText("⏹ 停止")
+                self._listen_btn.setText("停止")
                 self._tray.set_listening(True)
 
-    def _toggle_filter(self) -> None:
-        current = self._session_mgr.settings.llm_filter_teacher_only
-        self._session_mgr.settings.set("llm_filter_teacher_only", not current)
-        self._filter_btn.setText("全部" if current else "教师")
+    def _toggle_stay_on_top(self) -> None:
+        self._stay_on_top = not self._stay_on_top
+        self._pin_btn.setChecked(self._stay_on_top)
+        pos = self.pos()
+        size = self.size()
+        was_visible = self.isVisible()
+        if self._stay_on_top:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        else:
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+        self.resize(size)
+        self.move(pos)
+        if was_visible:
+            self.show()
 
     def _toggle_visibility(self) -> None:
         if self.isVisible():
@@ -228,23 +241,15 @@ class MainWindow(QMainWindow):
     def _show_menu(self) -> None:
         menu = QMenu(self)
 
-        settings_action = menu.addAction("⚙ 设置")
+        settings_action = menu.addAction("设置")
         settings_action.triggered.connect(self._show_settings)
 
-        speaker_action = menu.addAction("🎤 声纹管理")
-        speaker_action.triggered.connect(self._show_speaker_dialog)
-
-        history_action = menu.addAction("📚 历史记录")
+        history_action = menu.addAction("历史记录")
         history_action.triggered.connect(self._show_history)
 
         menu.addSeparator()
 
-        mark_teacher_action = menu.addAction("👨‍🏫 标记当前说话人为教师")
-        mark_teacher_action.triggered.connect(self._mark_teacher)
-
-        menu.addSeparator()
-
-        quit_action = menu.addAction("🚪 退出")
+        quit_action = menu.addAction("退出")
         quit_action.triggered.connect(self._quit)
 
         menu.exec(self.mapToGlobal(QPoint(0, self.height())))
@@ -298,7 +303,7 @@ class MainWindow(QMainWindow):
         self._question_input.focus_input()
 
     def hotkey_toggle_filter(self) -> None:
-        self._toggle_filter()
+        pass  # 过滤功能暂未启用
 
     # ── 状态回调 ──
 

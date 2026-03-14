@@ -88,7 +88,7 @@ class _ASRCallback(RecognitionCallback):
         if not text:
             return
 
-        is_final = "end_time" in sentence and sentence.get("end_time", 0) > 0
+        is_final = "end_time" in sentence and (sentence.get("end_time") or 0) > 0
 
         sent_idx = sentence.get("sentence_id", id(sentence))
         if not is_final:
@@ -98,8 +98,8 @@ class _ASRCallback(RecognitionCallback):
         else:
             self._last_sentence_texts.pop(sent_idx, None)
 
-        begin_time = sentence.get("begin_time", 0)
-        end_time = sentence.get("end_time", 0)
+        begin_time = sentence.get("begin_time") or 0
+        end_time = sentence.get("end_time") or 0
 
         if self._on_result:
             self._on_result(TranscriptResult(
