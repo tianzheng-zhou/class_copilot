@@ -8,8 +8,10 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -44,8 +46,9 @@ class QuestionCard(QFrame):
         layout.setSpacing(6)
 
         # 问题标题
-        source_icon = "🔍" if self.question.source == "auto" else "✋"
-        q_label = QLabel(f"{source_icon} {self.question.question_text}")
+        source_icons = {"auto": "🔍", "manual": "✋", "force": "💬"}
+        icon = source_icons.get(self.question.source, "❓")
+        q_label = QLabel(f"{icon} {self.question.question_text}")
         q_label.setObjectName("question_label")
         q_label.setWordWrap(True)
         layout.addWidget(q_label)
@@ -53,6 +56,12 @@ class QuestionCard(QFrame):
         # 答案区域
         self._answer_label = QLabel()
         self._answer_label.setWordWrap(True)
+        self._answer_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._answer_label.setSizePolicy(
+            self._answer_label.sizePolicy().horizontalPolicy(),
+            QSizePolicy.Policy.Minimum,
+        )
+        self._answer_label.setMinimumHeight(20)
         self._answer_label.setStyleSheet("color: #d4d4d4; padding: 4px;")
         layout.addWidget(self._answer_label)
 
@@ -109,6 +118,9 @@ class AnswerView(QWidget):
     """答案展示区域。"""
 
     copy_to_clipboard = pyqtSignal(str)
+    manual_detect_requested = pyqtSignal()  # 手动检测信号
+    manual_question_submitted = pyqtSignal(str)  # 手动提交问题信号
+    force_answer_requested = pyqtSignal()  # 强制回答信号
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -118,7 +130,46 @@ class AnswerView(QWidget):
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
 
+        # ── 操作栏 ──
+        action_bar = QVBoxLayout()
+        action_bar.setSpacing(4)
+
+        # 手动检测按钮
+        self._detect_btn = QPushButton("🔍 手动检测问题（从最近转写中检测）")
+        self._detect_btn.setObjectName("secondary_btn")
+        self._detect_btn.setFixedHeight(30)
+        self._detect_btn.setToolTip("从最近的转写内容中检测是否有问题（快捷键 Ctrl+Shift+Q）")
+        self._detect_btn.clicked.connect(self._on_detect_clicked)
+        action_bar.addWidget(self._detect_btn)
+
+        # 强制回答按钮
+        self._force_btn = QPushButton("💬 强制回答（基于最近转写内容生成回答）")
+        self._force_btn.setObjectName("secondary_btn")
+        self._force_btn.setFixedHeight(30)
+        self._force_btn.setToolTip("无论最近内容是否为提问，都强制让 AI 生成回答")
+        self._force_btn.clicked.connect(self._on_force_clicked)
+        action_bar.addWidget(self._force_btn)
+
+        # 手动输入问题行
+        input_row = QHBoxLayout()
+        input_row.setSpacing(4)
+        self._question_input = QLineEdit()
+        self._question_input.setPlaceholderText("输入问题，生成简洁版+展开版答案")
+        self._question_input.setFixedHeight(30)
+        self._question_input.returnPressed.connect(self._on_submit_question)
+        input_row.addWidget(self._question_input)
+
+        self._submit_btn = QPushButton("回答")
+        self._submit_btn.setFixedSize(60, 30)
+        self._submit_btn.clicked.connect(self._on_submit_question)
+        input_row.addWidget(self._submit_btn)
+        action_bar.addLayout(input_row)
+
+        layout.addLayout(action_bar)
+
+        # ── 问题卡片列表 ──
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -128,13 +179,46 @@ class AnswerView(QWidget):
         self._container_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._container_layout.setSpacing(8)
 
-        self._placeholder = QLabel("暂无检测到的问题")
+        self._placeholder = QLabel("暂无检测到的问题\n\n自动检测：开始监听后，系统会实时检测转写中的问题\n手动检测：点击上方按钮或按 Ctrl+Shift+Q\n手动输入：在上方输入框中直接输入问题")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._placeholder.setStyleSheet("color: #808080; padding: 20px;")
         self._container_layout.addWidget(self._placeholder)
 
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll)
+
+    def _on_detect_clicked(self) -> None:
+        """手动检测按钮点击。"""
+        self._detect_btn.setEnabled(False)
+        self._detect_btn.setText("🔍 正在检测...")
+        self.manual_detect_requested.emit()
+        # 2秒后恢复按钮状态
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(2000, self._reset_detect_btn)
+
+    def _reset_detect_btn(self) -> None:
+        self._detect_btn.setEnabled(True)
+        self._detect_btn.setText("🔍 手动检测问题（从最近转写中检测）")
+
+    def _on_force_clicked(self) -> None:
+        """强制回答按钮点击。"""
+        self._force_btn.setEnabled(False)
+        self._force_btn.setText("💬 正在生成回答...")
+        self.force_answer_requested.emit()
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(3000, self._reset_force_btn)
+
+    def _reset_force_btn(self) -> None:
+        self._force_btn.setEnabled(True)
+        self._force_btn.setText("💬 强制回答（基于最近转写内容生成回答）")
+
+    def _on_submit_question(self) -> None:
+        """手动提交问题。"""
+        text = self._question_input.text().strip()
+        if not text:
+            return
+        self._question_input.clear()
+        self.manual_question_submitted.emit(text)
 
     @pyqtSlot(object)
     def add_question(self, question: DetectedQuestion) -> None:

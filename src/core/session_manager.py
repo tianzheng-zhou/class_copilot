@@ -255,8 +255,10 @@ class SessionManager:
         if not self._question_detector:
             return
 
-        # 根据过滤模式决定是否检测
-        if self.settings.llm_filter_teacher_only and segment.speaker_role != SpeakerRole.TEACHER:
+        # 根据过滤模式决定是否检测（UNKNOWN 角色不过滤，因为 ASR 可能不提供说话人信息）
+        if (self.settings.llm_filter_teacher_only
+                and segment.speaker_role != SpeakerRole.TEACHER
+                and segment.speaker_role != SpeakerRole.UNKNOWN):
             return
 
         # 冷却防抖：避免短时间内频繁调用 LLM
@@ -279,10 +281,14 @@ class SessionManager:
     def manual_detect_question(self) -> None:
         """手动触发问题检测。"""
         if not self._question_detector:
+            if self.on_error:
+                self.on_error("LLM 未初始化，请检查 API Key 配置")
             return
 
         recent_text = self.transcript_mgr.get_recent_text(5)
         if not recent_text:
+            if self.on_error:
+                self.on_error("暂无转写内容可供检测")
             return
 
         def _detect():
@@ -291,8 +297,66 @@ class SessionManager:
             if result and result.get("is_question"):
                 question_text = result.get("question_text", recent_text)
                 self._handle_detected_question(question_text, source="manual")
+            else:
+                if self.on_status_changed:
+                    self.on_status_changed("未在最近转写中检测到问题")
 
         threading.Thread(target=_detect, daemon=True).start()
+
+    def submit_question(self, question_text: str) -> None:
+        """手动提交问题文本，直接生成答案。"""
+        if not self._answer_generator:
+            if self.on_error:
+                self.on_error("LLM 未初始化，请检查 API Key 配置")
+            return
+        self._handle_detected_question(question_text, source="manual")
+
+    def force_answer(self) -> None:
+        """强制回答：把最近转写内容作为问题/话题，让 AI 生成回答。"""
+        if not self._answer_generator:
+            if self.on_error:
+                self.on_error("LLM 未初始化，请检查 API Key 配置")
+            return
+
+        recent_text = self.transcript_mgr.get_recent_text(5)
+        if not recent_text:
+            if self.on_error:
+                self.on_error("暂无转写内容")
+            return
+
+        # 直接把最近内容当作问题提交，跳过检测和去重
+        if not self._session:
+            return
+
+        session_id = self._session.id
+        course_name = self._session.course_name
+
+        question = DetectedQuestion(
+            session_id=session_id,
+            question_text=f"[强制回答] {recent_text[-200:]}",
+            source="force",
+        )
+        question.id = self.db.add_question(question)
+
+        if self.on_question_detected:
+            self.on_question_detected(question)
+
+        def _generate():
+            context = self.transcript_mgr.get_context_text(teacher_only=False)
+            concise, detailed = self._answer_generator.generate(
+                question=recent_text,
+                context=context,
+                course_name=course_name,
+                language=self.settings.language,
+            )
+            question.concise_answer = concise
+            question.detailed_answer = detailed
+            self.db.update_question_answers(question.id, concise, detailed)
+
+            if self.on_answer_ready:
+                self.on_answer_ready(question)
+
+        threading.Thread(target=_generate, daemon=True).start()
 
     def _handle_detected_question(self, question_text: str, source: str) -> None:
         """处理检测到的问题：通知 + 生成答案。"""

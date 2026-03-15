@@ -44,7 +44,10 @@ class TranscriptManager:
         parts = []
         total = 0
         for seg in reversed(self._segments):
-            if teacher_only and seg.speaker_role != SpeakerRole.TEACHER:
+            # teacher_only 模式下：只过滤明确非教师的角色，UNKNOWN 放行
+            if teacher_only and seg.speaker_role not in (
+                SpeakerRole.TEACHER, SpeakerRole.UNKNOWN
+            ):
                 continue
             if not seg.is_final:
                 continue

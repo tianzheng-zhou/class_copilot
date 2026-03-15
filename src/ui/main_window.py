@@ -168,6 +168,9 @@ class MainWindow(QMainWindow):
         self._question_input.question_submitted.connect(self._on_user_question)
         self._question_input.settings_changed.connect(self._on_qa_settings_changed)
         self._answer_view.copy_to_clipboard.connect(self._copy_text)
+        self._answer_view.manual_detect_requested.connect(self._on_manual_detect)
+        self._answer_view.manual_question_submitted.connect(self._on_manual_question)
+        self._answer_view.force_answer_requested.connect(self._on_force_answer)
 
     def _connect_session_callbacks(self) -> None:
         sm = self._session_mgr
@@ -255,6 +258,27 @@ class MainWindow(QMainWindow):
 
     def _on_user_question(self, question: str) -> None:
         self._session_mgr.ask_question(question)
+
+    def _on_manual_detect(self) -> None:
+        """手动检测问题。"""
+        if not self._session_mgr.is_listening:
+            self._on_error("请先开始监听后再检测问题")
+            return
+        self._session_mgr.manual_detect_question()
+
+    def _on_manual_question(self, question: str) -> None:
+        """手动输入问题并生成答案。"""
+        if not self._session_mgr.is_listening:
+            self._on_error("请先开始监听后再提交问题")
+            return
+        self._session_mgr.submit_question(question)
+
+    def _on_force_answer(self) -> None:
+        """强制回答（不管最近内容是否为提问）。"""
+        if not self._session_mgr.is_listening:
+            self._on_error("请先开始监听后再使用强制回答")
+            return
+        self._session_mgr.force_answer()
 
     def _show_menu(self) -> None:
         menu = QMenu(self)
