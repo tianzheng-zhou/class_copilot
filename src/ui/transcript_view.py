@@ -76,7 +76,7 @@ class TranscriptView(QWidget):
             label_text = "教师"
         else:
             label_fmt.setForeground(QColor("#569cd6"))
-            label_text = segment.speaker_label or "未知"
+            label_text = segment.speaker_label or "发言"
 
         label_fmt.setFontWeight(700)
         cursor.insertText(f"\n{label_text}: ", label_fmt)

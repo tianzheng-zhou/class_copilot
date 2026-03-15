@@ -18,7 +18,7 @@ _DEFAULT_SETTINGS = {
     "bilingual_display": True,
     "storage_path": "",
     "hotkeys": dict(DEFAULT_HOTKEYS),
-    "llm_filter_teacher_only": True,
+    "llm_filter_teacher_only": False,
     "qa_model": "qwen3.5-plus",
     "qa_enable_thinking": False,
 }
