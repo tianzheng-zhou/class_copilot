@@ -64,6 +64,13 @@ class HistoryView(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
+        self._delete_btn = QPushButton("删除")
+        self._delete_btn.setToolTip("删除选中的课堂记录及其音频文件")
+        self._delete_btn.setEnabled(False)
+        self._delete_btn.setStyleSheet("QPushButton { color: #ff6b6b; }")
+        self._delete_btn.clicked.connect(self._on_delete)
+        btn_layout.addWidget(self._delete_btn)
+
         self._resume_btn = QPushButton("▶ 续记")
         self._resume_btn.setToolTip("在此会话上继续录制新内容（历史转写上下文保留）")
         self._resume_btn.setEnabled(False)
@@ -98,6 +105,30 @@ class HistoryView(QDialog):
         md = self._session_mgr.export_session_markdown(session_id)
         self._detail.setMarkdown(md)
         self._resume_btn.setEnabled(True)
+        self._delete_btn.setEnabled(True)
+
+    def _on_delete(self) -> None:
+        current = self._list.currentItem()
+        if not current:
+            return
+        session_id = current.data(Qt.ItemDataRole.UserRole)
+        reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定要删除此课堂记录吗？\n\n"
+            f"{current.text()}\n\n"
+            "此操作将同时删除转写记录、问题答案和音频文件，且不可恢复。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if self._session_mgr.delete_session(session_id):
+            self._detail.clear()
+            self._resume_btn.setEnabled(False)
+            self._delete_btn.setEnabled(False)
+            self._load_sessions()
+        else:
+            QMessageBox.warning(self, "删除失败", "无法删除正在进行中的会话。")
 
     def _on_resume(self) -> None:
         current = self._list.currentItem()

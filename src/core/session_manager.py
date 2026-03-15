@@ -8,6 +8,7 @@ import threading
 from collections import deque
 from datetime import datetime
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Callable
 
 from src.asr.audio_capture import AudioCapture
@@ -451,6 +452,25 @@ class SessionManager:
 
     def get_history_sessions(self) -> list[ClassSession]:
         return self.db.list_sessions()
+
+    def delete_session(self, session_id: int) -> bool:
+        """删除历史会话及其关联数据和音频文件。"""
+        if self._session and self._session.id == session_id and self._is_listening:
+            return False
+        session = self.db.get_session(session_id)
+        if not session:
+            return False
+        # 删除音频文件
+        if session.audio_path:
+            audio = Path(session.audio_path)
+            if audio.exists():
+                audio.unlink(missing_ok=True)
+            # 如果所在文件夹为空则一并删除
+            if audio.parent.exists() and not any(audio.parent.iterdir()):
+                audio.parent.rmdir()
+        # 删除数据库记录
+        self.db.delete_session(session_id)
+        return True
 
     def resume_session(self, session_id: int) -> bool:
         """续记：恢复一个已停止的历史会话。"""

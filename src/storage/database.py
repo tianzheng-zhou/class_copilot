@@ -154,6 +154,15 @@ class Database:
         rows = self.conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
         return [self._row_to_session(r) for r in rows]
 
+    def delete_session(self, session_id: int) -> None:
+        """删除会话及其所有关联数据（转写、问题、主动问答）。"""
+        with self._lock:
+            self.conn.execute("DELETE FROM transcript_segments WHERE session_id=?", (session_id,))
+            self.conn.execute("DELETE FROM detected_questions WHERE session_id=?", (session_id,))
+            self.conn.execute("DELETE FROM active_qa WHERE session_id=?", (session_id,))
+            self.conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+            self.conn.commit()
+
     @staticmethod
     def _row_to_session(row: sqlite3.Row) -> ClassSession:
         return ClassSession(
