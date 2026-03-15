@@ -33,10 +33,10 @@ class QwenClient:
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                # enable_thinking 非 OpenAI 标准参数，需通过 extra_body 传入
+                # qwen3.5 系列默认开启思考，必须显式传 False 才能关闭
+                extra_body={"enable_thinking": enable_thinking},
             )
-            # enable_thinking 非 OpenAI 标准参数，需通过 extra_body 传入
-            if enable_thinking:
-                kwargs["extra_body"] = {"enable_thinking": True}
             resp = self._client.chat.completions.create(**kwargs)
             return resp.choices[0].message.content or ""
         except Exception as e:
@@ -59,9 +59,8 @@ class QwenClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
+                extra_body={"enable_thinking": enable_thinking},
             )
-            if enable_thinking:
-                kwargs["extra_body"] = {"enable_thinking": True}
             stream = self._client.chat.completions.create(**kwargs)
             for chunk in stream:
                 if not chunk.choices:
