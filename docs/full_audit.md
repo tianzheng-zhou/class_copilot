@@ -1,14 +1,15 @@
 # class_copilot 全面代码审计报告
 
 > 审计日期：2026-03-16  
-> 审计范围：全部源代码 + 项目配置 + 安全性 + 功能完整性  
-> 严重程度分级：🔴 严重 / 🟠 高 / 🟡 中 / 🔵 低 / 💡 建议
+> 审计范围：全部源代码 + 项目配置 + 功能完整性  
+> 严重程度分级：🔴 严重 / 🟠 高 / 🟡 中 / 🔵 低 / 💡 建议  
+> 排除项：API Key 加密、文件权限（个人使用）、XSS/敏感配置、日志提交（已 gitignore）、说话人识别（暂弃用）
 
 ---
 
 ## 目录
 
-1. [安全漏洞](#1-安全漏洞)
+1. [安全与健壮性](#1-安全与健壮性)
 2. [程序 Bug 与崩溃风险](#2-程序-bug-与崩溃风险)
 3. [并发与线程安全](#3-并发与线程安全)
 4. [性能问题](#4-性能问题)
@@ -20,166 +21,9 @@
 
 ---
 
-## 1. 安全漏洞
+## 1. 安全与健壮性
 
-### 🔴 1.1 API Key 加密密钥可预测 — 等同于明文存储
-
-**文件**: `src/utils/crypto.py` (第 31-35 行)
-
-**问题**: `KeyVault` 使用 `COMPUTERNAME` + `USERNAME` 环境变量组合作为 PBKDF2 的密码派生源。这两个值在本机上完全公开可获取（任何用户、任何程序均可读取），攻击者只需：
-1. 获取 `~/.class_copilot/vault.json` 和 `vault.salt` 文件
-2. 读取本机的 `COMPUTERNAME` 和 `USERNAME`
-3. 使用相同算法立即解密出 API Key
-
-**这意味着加密形同虚设**，任何能访问用户目录的程序（包括恶意软件、其他用户进程）都能提取 API Key。
-
-**影响**: API Key 泄露后，攻击者可以：
-- 使用你的阿里云百炼配额调用 LLM 和 ASR 服务产生费用
-- 以你的身份访问阿里云百炼平台
-
-**改进方案**（由弱到强）：
-1. **推荐 — 使用 Windows DPAPI**：调用 `win32crypt.CryptProtectData()` 加密，密钥由 Windows 用户登录凭据保护，其他用户/进程无法解密。
-2. **可选 — Windows Credential Manager**：使用 `keyring` 库将 API Key 存入系统凭据管理器。
-3. **最简 — 使用随机主密钥**：首次运行时生成一个随机密钥存储在系统凭据管理器中，用它来加密 vault.json。
-
-```python
-# 方案 1：使用 Windows DPAPI（无需第三方库）
-import ctypes
-import ctypes.wintypes
-
-class KeyVault:
-    def _encrypt(self, data: bytes) -> bytes:
-        # 调用 CryptProtectData
-        ...
-    def _decrypt(self, data: bytes) -> bytes:
-        # 调用 CryptUnprotectData
-        ...
-```
-
-```python
-# 方案 2：使用 keyring（跨平台，推荐）
-# pip install keyring
-import keyring
-
-class KeyVault:
-    SERVICE_NAME = "class_copilot"
-
-    def store(self, name: str, value: str) -> None:
-        keyring.set_password(self.SERVICE_NAME, name, value)
-
-    def retrieve(self, name: str) -> str | None:
-        return keyring.get_password(self.SERVICE_NAME, name)
-```
-
----
-
-### 🔴 1.2 vault.json 和 vault.salt 文件权限未限制
-
-**文件**: `src/utils/crypto.py`
-
-**问题**: 加密相关文件（`vault.json`, `vault.salt`）创建时使用默认文件权限。在多用户系统上，其他用户可能有权读取这些文件。
-
-**改进方案**: 创建文件后限制权限为仅当前用户可读写。
-
-```python
-import os
-import stat
-
-def _set_file_permissions(path: Path) -> None:
-    """仅允许当前用户读写。"""
-    if os.name == 'nt':
-        # Windows: 使用 icacls 或 Python ACL 库
-        import subprocess
-        subprocess.run(
-            ['icacls', str(path), '/inheritance:r',
-             '/grant:r', f'{os.environ["USERNAME"]}:F'],
-            capture_output=True
-        )
-```
-
----
-
-### 🟠 1.3 DashScope API Key 全局设置导致泄露风险
-
-**文件**: `src/asr/dashscope_asr.py` (第 133 行, 第 294 行)
-
-**问题**: `dashscope.api_key = self._api_key` 将 API Key 设置为全局模块属性。如果进程中有其他使用 dashscope SDK 的代码，或者有调试工具 dump 模块属性，都会暴露 API Key。同时，多个 ASR 客户端实例如果使用不同 Key 会互相覆盖。
-
-**改进方案**: 通过实例级参数传递 API Key，而非全局设置。
-```python
-# FunASRClient
-self._recognition = Recognition(
-    model=self._model,
-    format="pcm",
-    sample_rate=AUDIO_SAMPLE_RATE,
-    callback=callback,
-    language_hints=["zh", "en", "ja"],
-    api_key=self._api_key,  # 实例级传递（如 SDK 支持）
-)
-```
-
----
-
-### 🟠 1.4 日志文件可能记录敏感信息
-
-**文件**: `src/main.py` (第 7-13 行)
-
-**问题**: 
-1. 日志文件 `class_copilot.log` 创建在工作目录（项目根目录），而非用户私有目录。如果项目是 git 仓库，日志文件可能被误提交。
-2. 多处 `logger.error` 记录了完整的异常信息，可能包含 API Key（如 OpenAI 客户端的错误信息中可能包含请求 URL 和 headers）。
-3. `.gitignore` 中没有排除 `*.log` 文件（虽然有 `data/`，但 log 在根目录）。
-
-**改进方案**:
-```python
-# 1. 将日志文件放在配置目录
-log_path = Path.home() / ".class_copilot" / "class_copilot.log"
-log_path.parent.mkdir(parents=True, exist_ok=True)
-
-# 2. 在 .gitignore 中添加
-# *.log
-
-# 3. 对 LLM/ASR 错误日志进行脱敏
-logger.error("LLM 调用失败: %s", type(e).__name__)  # 只记录异常类型
-```
-
----
-
-### 🟠 1.5 XSS 风险 — 用户输入直接拼入 HTML
-
-**文件**: `src/ui/question_input.py` (第 139 行, 第 144 行)
-
-**问题**: `_append_user_message()` 将用户输入直接拼入 HTML 字符串：
-```python
-self._history.append(f'<p style="color:#569cd6;"><b>🙋 你:</b> {text}</p>')
-```
-以及 `add_answer()` 中 LLM 返回的内容也直接拼入 HTML。如果 LLM 返回包含恶意 HTML/JS 的内容（prompt injection），虽然 QTextBrowser 默认不执行 JavaScript，但可能导致：
-- HTML 注入导致界面布局破坏
-- 通过 `<img src="http://attacker.com/track">` 等标签产生外部请求（信息泄露）
-
-**改进方案**: 对所有拼入 HTML 的文本进行转义。
-```python
-from html import escape
-
-def _append_user_message(self, text: str) -> None:
-    safe_text = escape(text)
-    self._history.append(f'<p style="color:#569cd6;"><b>🙋 你:</b> {safe_text}</p>')
-```
-
-同样，`_md_to_html()` 函数也需要先转义原始文本再处理 Markdown 标记，或使用成熟的 Markdown 渲染库。
-
----
-
-### 🟡 1.6 settings.json 明文存储敏感配置
-
-**文件**: `src/config/settings.py`
-
-**问题**: 虽然 API Key 使用 vault 加密存储，但 `settings.json` 中可能包含用户的课程名、存储路径等个人信息，以明文 JSON 存储且无访问控制。
-
-**改进方案**: 非关键问题，但应在文档中提醒用户注意保护 `~/.class_copilot` 目录。
-
----
-
-### 🟡 1.7 LLM Prompt Injection 风险
+### � 1.1 LLM Prompt Injection 风险
 
 **文件**: `src/llm/question_detector.py`, `src/llm/answer_generator.py`
 
@@ -209,7 +53,7 @@ QUESTION_DETECTION_PROMPT = """\
 
 ## 2. 程序 Bug 与崩溃风险
 
-### 🔴 2.1 `_on_asr_result` 翻译阻塞回调线程导致音频丢失
+### 🔴 2.1 翻译阻塞 ASR 回调线程导致音频丢失
 
 **文件**: `src/core/session_manager.py` (第 192-196 行)
 
@@ -240,53 +84,7 @@ if need_translation and result.is_final:
 
 ---
 
-### 🔴 2.2 `llm_filter_teacher_only` 实际始终为 False — 过滤功能不生效
-
-**文件**: `src/core/session_manager.py` (第 229 行), `src/config/settings.py` (第 21 行)
-
-**问题**: `_auto_detect_question` 中检查 `self.settings.llm_filter_teacher_only`，但：
-1. `_DEFAULT_SETTINGS` 中 `llm_filter_teacher_only` 默认为 `False`
-2. `hotkey_toggle_filter` 方法为空（`pass`），用户无法切换
-3. UI 中没有任何地方可以开启此功能
-
-**结果**: 无论说话人是谁，所有转写文本都会被送入问题检测和答案生成，浪费 API 调用且可能产生错误检测。
-
-**改进方案**:
-```python
-# main_window.py
-def hotkey_toggle_filter(self) -> None:
-    current = self._session_mgr.settings.llm_filter_teacher_only
-    self._session_mgr.settings.set("llm_filter_teacher_only", not current)
-    mode = "仅教师" if not current else "所有人"
-    self._status_label.setText(f"LLM 输入模式: {mode}")
-```
-
----
-
-### 🟠 2.3 `get_context_text` 在 `teacher_only=True` 时可能返回空字符串
-
-**文件**: `src/core/transcript.py` (第 38-50 行)
-
-**问题**: 当 `teacher_only=True` 时，`get_context_text` 只包含 `speaker_role == TEACHER` 的段落。但当前 ASR 不进行说话人分离（DashScope Fun-ASR 和 Qwen3-ASR 都不原生返回说话人角色），所有段落的 `speaker_role` 都是 `UNKNOWN`。
-
-**结果**: 如果 `llm_filter_teacher_only` 被设为 `True`，问题检测和答案生成会收到空的上下文，导致答案质量极差。
-
-**改进方案**: 
-1. 在 ASR 不支持说话人分离时，不应启用 `teacher_only` 过滤
-2. 或者配置一个 fallback：当过滤后上下文为空时，回退到全部文本
-
-```python
-def get_context_text(self, max_chars: int = 3000, teacher_only: bool = True) -> str:
-    text = self._build_context(max_chars, teacher_only)
-    if not text and teacher_only:
-        # Fallback: 没有识别到教师发言，使用全部文本
-        text = self._build_context(max_chars, teacher_only=False)
-    return text
-```
-
----
-
-### 🟠 2.4 Qwen3-ASR 不返回时间戳，导致段落排序异常
+### � 2.2 Qwen3-ASR 不返回时间戳，导致段落排序异常
 
 **文件**: `src/asr/dashscope_asr.py` (第 268-276 行)
 
@@ -317,7 +115,7 @@ TranscriptResult(
 
 ---
 
-### 🟠 2.5 续记功能音频路径不更新到数据库
+### 🟠 2.3 续记功能音频路径不更新到数据库
 
 **文件**: `src/core/session_manager.py` (第 510 行)
 
@@ -344,7 +142,7 @@ self.db.update_session_audio_path(session_id, combined)
 
 ---
 
-### 🟠 2.6 QwenASRClient 连接状态管理存在竞态
+### 🟠 2.4 QwenASRClient 连接状态管理存在竞态
 
 **文件**: `src/asr/dashscope_asr.py` (第 290-320 行)
 
@@ -354,7 +152,39 @@ self.db.update_session_audio_path(session_id, combined)
 
 ---
 
-### 🟡 2.7 `_md_to_html` 正则替换存在安全和功能缺陷
+### � 2.5 QwenASRClient 长时间运行必然失败 — 缺少错误处理与自动重连
+
+**文件**: `src/asr/dashscope_asr.py` (第 240-340 行)；`src/config/settings.py` (第 14 行)
+
+**问题**: `QwenASRClient` 通过 OmniRealtime WebSocket API 实现实时 ASR。根据官方文档（[实时(Qwen-Omni-Realtime)](https://help.aliyun.com/zh/model-studio/realtime)），**单次 WebSocket 会话最长可持续 120 分钟**，超时后服务端主动关闭连接。代码存在以下严重缺陷：
+
+1. **`_QwenCallback` 未重写 `on_error`**: WebSocket 错误事件被静默丢弃，不会转发到上层 `_on_error` 回调，导致连接失败时应用无法感知。
+2. **无自动重连机制**: 长时间会话中如果 WebSocket 断连（网络波动、达到 120 分钟上限、服务端下发错误），ASR 功能直接停止，不会尝试恢复。
+3. **无会话时长管理**: 对于 90 分钟课堂场景，应该在接近 120 分钟上限前主动刷新连接，但代码完全没有做这方面的处理。
+4. **默认 ASR 模型即为此客户端**: `settings.py` 中 `_DEFAULT_SETTINGS["asr_model"]` 为 `"qwen3-asr-flash-realtime"`，意味着新用户首次使用就会命中此问题。
+
+**实际监控数据**: 百炼监控面板显示 `qwen3-asr-flash-realtime` 调用情况为 **1 次调用 / 1 次失败 / 100% 失败率 / 平均时长 1624.05 秒（~27 分钟）**。虽然未达到 120 分钟会话上限，但会话仍以失败结束，佐证了错误处理不足的问题。
+
+**影响**: 使用默认 ASR 模型的用户，在课堂进行到某一时刻后 ASR 会静默停止工作，且无任何错误提示。
+
+**改进方案**:
+```python
+class _QwenCallback(OmniRealtimeCallback):
+    def on_error(self, error) -> None:
+        logger.error("Qwen3-ASR WebSocket 错误: %s", error)
+        client._connected = False
+        if client._on_error:
+            client._on_error(f"ASR WebSocket 错误: {error}")
+
+# 在 QwenASRClient 中添加会话时长监控和自动重连
+def _schedule_session_refresh(self):
+    """在会话即将到达 120 分钟上限前主动刷新连接"""
+    ...
+```
+
+---
+
+### 🟡 2.6 `_md_to_html` 正则替换存在功能缺陷
 
 **文件**: `src/ui/question_input.py` (第 24-65 行)
 
@@ -376,7 +206,7 @@ html = markdown.markdown(text, extensions=['fenced_code'])
 
 ---
 
-### 🟡 2.8 `AudioCapture.stop()` 可能导致 pyaudio 异常
+### 🟡 2.7 `AudioCapture.stop()` 可能导致 pyaudio 异常
 
 **问题**: `stop()` 中先调用 `stop_stream()` 再 `join` 线程，但如果线程中的 `read()` 在 `stop_stream` 和 `close` 之间被调用，可能产生 `OSError`。虽然有 `try/except OSError` 在 `_capture_loop`，但异常处理后 `break` 会导致循环提前退出，可能遗漏最后一帧数据。
 
@@ -384,7 +214,7 @@ html = markdown.markdown(text, extensions=['fenced_code'])
 
 ---
 
-### 🟡 2.9 `stop_session()` 不等待后台线程完成
+### 🟡 2.8 `stop_session()` 不等待后台线程完成
 
 **文件**: `src/core/session_manager.py` 
 
@@ -407,7 +237,7 @@ def stop_session(self) -> None:
 
 ---
 
-### 🟡 2.10 日志文件无大小限制 — 可能填满磁盘
+### 🟡 2.9 日志文件无大小限制 — 可能填满磁盘
 
 **文件**: `src/main.py` (第 11 行)
 
@@ -707,17 +537,6 @@ class ASRState(enum.Enum):
 - 离线状态 UI 指示
 - 断网期间音频缓冲（用于重连后补充转写）
 - LLM 请求失败时的重试/队列机制
-
----
-
-### 🔵 5.7 `SpeakerManager` 功能不完整
-
-**文件**: `src/core/speaker_manager.py`
-
-**问题**: 
-1. `_speaker_label_map` 只存在于内存中，重启后失效
-2. 当前 ASR（Fun-ASR / Qwen3-ASR）不返回说话人标签，整个说话人识别功能实际上不可用
-3. 标记的教师角色不会反映到已有的 `TranscriptSegment.speaker_role` 上
 
 ---
 
@@ -1110,52 +929,47 @@ ERROR_MESSAGES = {
 
 | 类别 | 🔴 严重 | 🟠 高 | 🟡 中 | 🔵 低 | 💡 建议 |
 |------|:-------:|:-----:|:-----:|:-----:|:-------:|
-| 安全漏洞 | 2 | 3 | 2 | — | — |
-| Bug/崩溃 | 2 | 4 | 4 | — | — |
+| 安全与健壮性 | — | — | 1 | — | — |
+| Bug/崩溃 | 2 | 3 | 4 | — | — |
 | 并发/线程 | 1 | 2 | 1 | — | — |
 | 性能问题 | 1 | 2 | 2 | 1 | — |
-| 架构设计 | — | 3 | 3 | 1 | — |
+| 架构设计 | — | 3 | 3 | — | — |
 | UI/交互 | — | 2 | 3 | 2 | — |
 | 代码质量 | — | — | 3 | 3 | — |
 | 功能优化 | — | — | — | — | 14 |
-| **合计** | **6** | **16** | **18** | **7** | **14** |
+| **合计** | **4** | **12** | **17** | **6** | **14** |
 
 ### 建议修复优先级
 
-#### P0 — 立即修复（影响安全性和核心功能）
+#### P0 — 立即修复（影响核心功能）
 | # | 问题 | 原因 |
 |---|------|------|
-| 1.1 | API Key 加密密钥可预测 | API Key 泄露导致经济损失 |
-| 1.2 | vault 文件权限未限制 | 配合 1.1 使攻击更容易 |
 | 2.1 | 翻译阻塞 ASR 回调线程 | 英文课堂完全不可用 |
+| 2.5 | QwenASR 长时间会话无错误处理/自动重连 | 默认 ASR 模型下课堂中途静默停止识别，监控显示 100% 失败率 |
+| 3.1 | SQLite 读操作无锁 | 并发崩溃风险 |
 | 6.1 | 快捷键回调在非主线程执行 | 可能导致程序崩溃 |
 
 #### P1 — 一周内修复（影响稳定性和用户体验）
 | # | 问题 | 原因 |
 |---|------|------|
-| 1.3 | API Key 全局设置 | 潜在安全风险 |
-| 1.4 | 日志可能泄露敏感信息 | 安全 + 运维 |
-| 1.5 | HTML 注入风险 | 安全隐患 |
-| 2.2 | LLM 过滤功能不生效 | 浪费 API 调用 |
-| 2.3 | 上下文过滤可能返回空 | 答案质量问题 |
-| 2.4 | Qwen3-ASR 无时间戳 | 历史记录顺序错乱 |
-| 2.5 | 续记音频路径不更新 | 数据丢失风险 |
-| 3.1 | SQLite 读操作无锁 | 潜在并发 bug |
+| 2.2 | Qwen3-ASR 无时间戳 | 历史记录顺序错乱 |
+| 2.3 | 续记音频路径不更新 | 数据丢失风险 |
+| 2.4 | QwenASR 连接状态竞态 | 连接管理不可靠 |
 | 4.2 | 答案模式设置不生效 | 浪费 API 调用 |
+| 5.3 | 快捷键功能不完整 | 需求未满足 |
+| 6.2 | 首次运行弹窗时序 | 偶发 UI 异常 |
 
 #### P2 — 按迭代改进
 | # | 问题 | 原因 |
 |---|------|------|
-| 1.7 | Prompt Injection 防护 | 低概率但有影响 |
-| 2.7 | Markdown 渲染缺陷 | 显示异常 |
-| 2.9 | stop_session 不等待后台线程 | 潜在竞态 |
-| 2.10 | 日志无大小限制 | 长期运行问题 |
+| 1.1 | Prompt Injection 防护 | 低概率但有影响 |
+| 2.6 | Markdown 渲染缺陷 | 显示异常 |
+| 2.8 | stop_session 不等待后台线程 | 潜在竞态 |
+| 2.9 | 日志无大小限制 | 长期运行问题 |
 | 3.3 | 重连 timer 无线程保护 | 偶发竞态 |
 | 4.1 | 频繁 JSON 写入 | 性能 |
 | 5.1 | 无数据库迁移 | 版本升级风险 |
 | 5.2 | ASR 连接状态机 | 架构改进 |
-| 5.3 | 快捷键功能不完整 | 需求未满足 |
-| 6.2 | 首次运行弹窗时序 | 偶发 UI 异常 |
 | 6.3 | 置顶切换闪烁 | 体验问题 |
 | 6.4 | 课程名重复项 | 小 bug |
 
