@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from datetime import datetime
 
 from src.storage.database import Database
@@ -16,7 +17,7 @@ class TranscriptManager:
 
     def __init__(self, db: Database) -> None:
         self._db = db
-        self._segments: list[TranscriptSegment] = []
+        self._segments: deque[TranscriptSegment] = deque(maxlen=500)
         self._current_session_id: int | None = None
 
     def set_session(self, session_id: int) -> None:
@@ -25,7 +26,8 @@ class TranscriptManager:
 
     def load_from_db(self, session_id: int) -> None:
         """从数据库恢复历史片段到内存（用于还原 LLM 上下文）。"""
-        self._segments = self._db.get_segments(session_id, final_only=True)
+        segments = self._db.get_segments(session_id, final_only=True)
+        self._segments = deque(segments, maxlen=500)
         self._current_session_id = session_id
 
     def add_segment(self, seg: TranscriptSegment) -> TranscriptSegment:

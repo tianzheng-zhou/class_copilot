@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -80,6 +81,7 @@ class Database:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -92,45 +94,55 @@ class Database:
 
     def initialize(self) -> None:
         self.conn.executescript(_CREATE_TABLES_SQL)
+        # 添加索引以提升按 session_id 查询的性能
+        self.conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_segments_session ON transcript_segments(session_id, start_time_ms);
+            CREATE INDEX IF NOT EXISTS idx_questions_session ON detected_questions(session_id);
+            CREATE INDEX IF NOT EXISTS idx_active_qa_session ON active_qa(session_id);
+        """)
         self.conn.commit()
 
     def close(self) -> None:
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
 
     # ── Sessions ──
 
     def create_session(self, session: ClassSession) -> int:
-        cur = self.conn.execute(
-            "INSERT INTO sessions (course_name, date, audio_path, status, language, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                session.course_name,
-                session.date,
-                session.audio_path,
-                session.status.value,
-                session.language,
-                session.created_at.isoformat(),
-            ),
-        )
-        self.conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO sessions (course_name, date, audio_path, status, language, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    session.course_name,
+                    session.date,
+                    session.audio_path,
+                    session.status.value,
+                    session.language,
+                    session.created_at.isoformat(),
+                ),
+            )
+            self.conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
 
     def update_session_status(self, session_id: int, status: SessionStatus) -> None:
         ended = datetime.now().isoformat() if status == SessionStatus.STOPPED else None
-        self.conn.execute(
-            "UPDATE sessions SET status=?, ended_at=? WHERE id=?",
-            (status.value, ended, session_id),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "UPDATE sessions SET status=?, ended_at=? WHERE id=?",
+                (status.value, ended, session_id),
+            )
+            self.conn.commit()
 
     def update_session_audio_path(self, session_id: int, audio_path: str) -> None:
-        self.conn.execute(
-            "UPDATE sessions SET audio_path=? WHERE id=?",
-            (audio_path, session_id),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "UPDATE sessions SET audio_path=? WHERE id=?",
+                (audio_path, session_id),
+            )
+            self.conn.commit()
 
     def get_session(self, session_id: int) -> ClassSession | None:
         row = self.conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
@@ -158,24 +170,34 @@ class Database:
     # ── Transcript ──
 
     def add_segment(self, seg: TranscriptSegment) -> int:
-        cur = self.conn.execute(
-            "INSERT INTO transcript_segments "
-            "(session_id, speaker_label, speaker_role, text, translation, start_time_ms, end_time_ms, is_final, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                seg.session_id,
-                seg.speaker_label,
-                seg.speaker_role.value,
-                seg.text,
-                seg.translation,
-                seg.start_time_ms,
-                seg.end_time_ms,
-                1 if seg.is_final else 0,
-                seg.created_at.isoformat(),
-            ),
-        )
-        self.conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO transcript_segments "
+                "(session_id, speaker_label, speaker_role, text, translation, start_time_ms, end_time_ms, is_final, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    seg.session_id,
+                    seg.speaker_label,
+                    seg.speaker_role.value,
+                    seg.text,
+                    seg.translation,
+                    seg.start_time_ms,
+                    seg.end_time_ms,
+                    1 if seg.is_final else 0,
+                    seg.created_at.isoformat(),
+                ),
+            )
+            self.conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
+
+    def update_segment_translation(self, segment_id: int, translation: str) -> None:
+        """更新转写片段的翻译内容。"""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE transcript_segments SET translation=? WHERE id=?",
+                (translation, segment_id),
+            )
+            self.conn.commit()
 
     def get_segments(self, session_id: int, final_only: bool = False) -> list[TranscriptSegment]:
         sql = "SELECT * FROM transcript_segments WHERE session_id=?"
@@ -202,20 +224,22 @@ class Database:
     # ── Questions ──
 
     def add_question(self, q: DetectedQuestion) -> int:
-        cur = self.conn.execute(
-            "INSERT INTO detected_questions (session_id, question_text, source, concise_answer, detailed_answer, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (q.session_id, q.question_text, q.source, q.concise_answer, q.detailed_answer, q.created_at.isoformat()),
-        )
-        self.conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO detected_questions (session_id, question_text, source, concise_answer, detailed_answer, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (q.session_id, q.question_text, q.source, q.concise_answer, q.detailed_answer, q.created_at.isoformat()),
+            )
+            self.conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
 
     def update_question_answers(self, question_id: int, concise: str, detailed: str) -> None:
-        self.conn.execute(
-            "UPDATE detected_questions SET concise_answer=?, detailed_answer=? WHERE id=?",
-            (concise, detailed, question_id),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "UPDATE detected_questions SET concise_answer=?, detailed_answer=? WHERE id=?",
+                (concise, detailed, question_id),
+            )
+            self.conn.commit()
 
     def get_questions(self, session_id: int) -> list[DetectedQuestion]:
         rows = self.conn.execute(
@@ -237,12 +261,13 @@ class Database:
     # ── Active QA ──
 
     def add_active_qa(self, qa: ActiveQA) -> int:
-        cur = self.conn.execute(
-            "INSERT INTO active_qa (session_id, question, answer, created_at) VALUES (?, ?, ?, ?)",
-            (qa.session_id, qa.question, qa.answer, qa.created_at.isoformat()),
-        )
-        self.conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO active_qa (session_id, question, answer, created_at) VALUES (?, ?, ?, ?)",
+                (qa.session_id, qa.question, qa.answer, qa.created_at.isoformat()),
+            )
+            self.conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
 
     def get_active_qas(self, session_id: int) -> list[ActiveQA]:
         rows = self.conn.execute(
@@ -262,20 +287,23 @@ class Database:
     # ── Speakers ──
 
     def add_speaker(self, speaker: Speaker) -> int:
-        cur = self.conn.execute(
-            "INSERT INTO speakers (name, role, feature_id, course_name, created_at) VALUES (?, ?, ?, ?, ?)",
-            (speaker.name, speaker.role.value, speaker.feature_id, speaker.course_name, speaker.created_at.isoformat()),
-        )
-        self.conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO speakers (name, role, feature_id, course_name, created_at) VALUES (?, ?, ?, ?, ?)",
+                (speaker.name, speaker.role.value, speaker.feature_id, speaker.course_name, speaker.created_at.isoformat()),
+            )
+            self.conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
 
     def update_speaker_feature_id(self, speaker_id: int, feature_id: str) -> None:
-        self.conn.execute("UPDATE speakers SET feature_id=? WHERE id=?", (feature_id, speaker_id))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("UPDATE speakers SET feature_id=? WHERE id=?", (feature_id, speaker_id))
+            self.conn.commit()
 
     def delete_speaker(self, speaker_id: int) -> None:
-        self.conn.execute("DELETE FROM speakers WHERE id=?", (speaker_id,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("DELETE FROM speakers WHERE id=?", (speaker_id,))
+            self.conn.commit()
 
     def get_speakers_by_course(self, course_name: str) -> list[Speaker]:
         rows = self.conn.execute(

@@ -59,14 +59,25 @@ class QuestionDetector:
         if not response:
             return None
 
+        return self._parse_detection_result(response)
+
+    @staticmethod
+    def _parse_detection_result(response: str) -> dict | None:
+        """解析并验证 LLM 返回的检测结果。"""
         try:
             import json
-            # 提取 JSON（处理可能的 markdown 代码块包裹）
             text = response.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0]
             result = json.loads(text)
+            # 类型验证
+            if not isinstance(result.get("is_question"), bool):
+                return None
+            if not isinstance(result.get("confidence"), (int, float)):
+                return None
+            if not isinstance(result.get("question_text"), str):
+                result["question_text"] = ""
             return result
-        except (json.JSONDecodeError, IndexError):
+        except (json.JSONDecodeError, IndexError, KeyError):
             logger.warning("问题检测结果解析失败: %s", response)
             return None

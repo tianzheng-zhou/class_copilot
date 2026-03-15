@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
+from collections import deque
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Callable
 
 from src.asr.audio_capture import AudioCapture
@@ -29,6 +32,9 @@ from src.storage.models import (
 from src.utils.notifier import notify_question_detected
 
 logger = logging.getLogger(__name__)
+
+# 本地预过滤：包含疑问特征时才调用 LLM
+_QUESTION_KEYWORDS = re.compile(r'[?？]|谁|什么|为什么|怎么|哪|吗|呢|想一想|回答|同学们|是不是|能不能|有没有')
 
 
 class SessionManager:
@@ -62,6 +68,12 @@ class SessionManager:
         # 当前会话状态
         self._session: ClassSession | None = None
         self._is_listening = False
+
+        # 重连定时器引用（用于取消）
+        self._reconnect_timer: threading.Timer | None = None
+
+        # 最近检测到的问题（用于去重）
+        self._recent_questions: deque[str] = deque(maxlen=20)
 
         # 回调
         self.on_transcript_update: Callable[[TranscriptSegment], None] | None = None
@@ -131,6 +143,11 @@ class SessionManager:
             return
 
         self._is_listening = False
+
+        # 取消待执行的重连定时器
+        if self._reconnect_timer:
+            self._reconnect_timer.cancel()
+            self._reconnect_timer = None
 
         # 停止音频采集
         if self._audio_capture:
@@ -217,8 +234,15 @@ class SessionManager:
             logger.warning("ASR 意外断开，尝试重连...")
             if self.on_status_changed:
                 self.on_status_changed("正在重连...")
-            if self._session:
-                threading.Timer(2.0, lambda: self._start_asr(self._session.course_name)).start()
+
+            def _reconnect():
+                # 重连前再次检查状态，避免竞态
+                if self._is_listening and self._session:
+                    self._start_asr(self._session.course_name)
+
+            timer = threading.Timer(2.0, _reconnect)
+            self._reconnect_timer = timer
+            timer.start()
 
     # ── 问题检测 ──
 
@@ -229,6 +253,10 @@ class SessionManager:
 
         # 根据过滤模式决定是否检测
         if self.settings.llm_filter_teacher_only and segment.speaker_role != SpeakerRole.TEACHER:
+            return
+
+        # 本地预过滤：无疑问特征时跳过 LLM 调用
+        if not _QUESTION_KEYWORDS.search(segment.text):
             return
 
         def _detect():
@@ -265,8 +293,18 @@ class SessionManager:
         if not self._session or not self._answer_generator:
             return
 
+        # 重复问题去重
+        if self._is_duplicate_question(question_text):
+            logger.debug("检测到重复问题，跳过: %s", question_text)
+            return
+        self._recent_questions.append(question_text)
+
+        # 在访问 self._session 前捕获必要的值，避免后台线程中 _session 变为 None
+        session_id = self._session.id
+        course_name = self._session.course_name
+
         question = DetectedQuestion(
-            session_id=self._session.id,
+            session_id=session_id,
             question_text=question_text,
             source=source,
         )
@@ -286,7 +324,7 @@ class SessionManager:
             concise, detailed = self._answer_generator.generate(
                 question=question_text,
                 context=context,
-                course_name=self._session.course_name if self._session else "",
+                course_name=course_name,
                 language=self.settings.language,
             )
             question.concise_answer = concise
@@ -298,6 +336,13 @@ class SessionManager:
 
         threading.Thread(target=_generate, daemon=True).start()
 
+    def _is_duplicate_question(self, new_q: str, threshold: float = 0.7) -> bool:
+        """检查是否与最近的问题重复。"""
+        for q in self._recent_questions:
+            if SequenceMatcher(None, new_q, q).ratio() > threshold:
+                return True
+        return False
+
     # ── 主动问答 ──
 
     def ask_question(self, user_question: str) -> None:
@@ -307,11 +352,13 @@ class SessionManager:
 
         qa_model = self.settings.get("qa_model", "qwen3.5-plus")
         enable_thinking = self.settings.get("qa_enable_thinking", False)
+        session_id = self._session.id
+        course_name = self._session.course_name
 
         def _ask():
             context = self.transcript_mgr.get_context_text(teacher_only=False)
             system_prompt = (
-                f"你是一个课堂学习助手。学生正在上「{self._session.course_name}」课程。"
+                f"你是一个课堂学习助手。学生正在上「{course_name}」课程。"
                 "请根据课堂内容回答学生的问题，帮助学生理解课堂知识。"
                 "如果问题与课堂内容无关，也可以尽力回答。"
             )
@@ -326,7 +373,7 @@ class SessionManager:
             )
 
             qa = ActiveQA(
-                session_id=self._session.id,
+                session_id=session_id,
                 question=user_question,
                 answer=answer,
             )

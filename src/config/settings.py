@@ -109,7 +109,7 @@ class Settings:
 
     @property
     def llm_filter_teacher_only(self) -> bool:
-        return self._data.get("llm_filter_teacher_only", True)
+        return self._data.get("llm_filter_teacher_only", _DEFAULT_SETTINGS["llm_filter_teacher_only"])
 
     @property
     def answer_mode_concise(self) -> bool:
@@ -121,7 +121,7 @@ class Settings:
 
     @property
     def asr_model(self) -> str:
-        return self._data.get("asr_model", "fun-asr-realtime")
+        return self._data.get("asr_model", _DEFAULT_SETTINGS["asr_model"])
 
     # ── 阿里云百炼 API Key（ASR + LLM 共用）──
     DASHSCOPE_API_KEY = "dashscope_api_key"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import logging
 import sys
 
@@ -39,6 +40,9 @@ class App:
         self.hotkey_mgr = HotkeyManager()
         self._setup_hotkeys()
 
+        # 注册紧急清理函数，作为崩溃时的额外保障
+        atexit.register(self._emergency_cleanup)
+
     def _setup_hotkeys(self) -> None:
         # 从设置加载自定义快捷键
         hotkeys = self.settings.hotkeys
@@ -71,3 +75,11 @@ class App:
         finally:
             self.hotkey_mgr.stop()
             self.session_mgr.cleanup()
+
+    def _emergency_cleanup(self) -> None:
+        """崩溃时的紧急资源清理。"""
+        try:
+            if self.session_mgr.is_listening:
+                self.session_mgr.stop_session()
+        except Exception:
+            pass

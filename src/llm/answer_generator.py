@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from src.config.constants import LLM_MODEL_FLASH
 from src.llm.qwen_client import QwenClient
@@ -73,10 +74,10 @@ class AnswerGenerator:
             )},
         ]
 
-        concise = self._client.chat(concise_msgs, model=LLM_MODEL_FLASH, temperature=0.7)
-        detailed = self._client.chat(detailed_msgs, model=LLM_MODEL_FLASH, temperature=0.7)
-
-        return concise, detailed
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_concise = pool.submit(self._client.chat, concise_msgs, LLM_MODEL_FLASH, 0.7)
+            f_detailed = pool.submit(self._client.chat, detailed_msgs, LLM_MODEL_FLASH, 0.7)
+            return f_concise.result(), f_detailed.result()
 
     def generate_concise(self, question: str, context: str, course_name: str = "", language: str = "zh") -> str:
         system = ANSWER_SYSTEM_PROMPT.format(course_name=course_name or "未知课程")

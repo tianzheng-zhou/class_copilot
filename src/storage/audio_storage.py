@@ -22,6 +22,7 @@ class AudioStorage:
         self._encoder: lameenc.Encoder | None = None
         self._file: BufferedWriter | None = None
         self._current_path: Path | None = None
+        self._chunk_count: int = 0
 
     def _open_mp3(self, path: Path) -> None:
         """初始化 LAME 编码器并打开输出文件。"""
@@ -59,6 +60,10 @@ class AudioStorage:
             mp3_bytes = self._encoder.encode(pcm_data)
             if mp3_bytes:
                 self._file.write(mp3_bytes)
+                self._chunk_count += 1
+                # 约每 10 秒刷盘一次，防止崩溃时数据丢失
+                if self._chunk_count % 250 == 0:
+                    self._file.flush()
 
     def stop_recording(self) -> str | None:
         """停止录音，刷新编码器缓冲并关闭文件，返回文件路径。"""
@@ -71,6 +76,7 @@ class AudioStorage:
         self._encoder = None
         self._file = None
         self._current_path = None
+        self._chunk_count = 0
         return path
 
     @property

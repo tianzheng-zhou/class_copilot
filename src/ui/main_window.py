@@ -54,6 +54,7 @@ class MainWindow(QMainWindow):
         self._init_tray()
         self._connect_signals()
         self._connect_session_callbacks()
+        self._load_course_history()
 
     def _init_ui(self) -> None:
         self.setWindowTitle("听课助手")
@@ -188,6 +189,12 @@ class MainWindow(QMainWindow):
         self._session_mgr.settings.set(key, value)
 
     # ── 控制操作 ──
+
+    def _load_course_history(self) -> None:
+        """从历史会话中加载课程名并填充到 ComboBox。"""
+        sessions = self._session_mgr.get_history_sessions()
+        courses = list(dict.fromkeys(s.course_name for s in sessions if s.course_name))
+        self._course_combo.addItems(courses)
 
     def _toggle_listen(self) -> None:
         if self._session_mgr.is_listening:

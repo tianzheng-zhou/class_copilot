@@ -86,12 +86,20 @@ class AudioCapture:
 
     def stop(self) -> None:
         self._running = False
+        # 先停止 stream 使阻塞的 read() 返回
+        if self._stream:
+            try:
+                self._stream.stop_stream()
+            except Exception:
+                pass
         if self._thread:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=3)
             self._thread = None
         if self._stream:
-            self._stream.stop_stream()
-            self._stream.close()
+            try:
+                self._stream.close()
+            except Exception:
+                pass
             self._stream = None
         if self._pa:
             self._pa.terminate()
