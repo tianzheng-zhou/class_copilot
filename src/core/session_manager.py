@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-import re
 import threading
+import time
 from collections import deque
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -34,8 +34,8 @@ from src.utils.notifier import notify_question_detected
 
 logger = logging.getLogger(__name__)
 
-# 本地预过滤：包含疑问特征时才调用 LLM
-_QUESTION_KEYWORDS = re.compile(r'[?？]|谁|什么|为什么|怎么|哪|吗|呢|想一想|回答|同学们|是不是|能不能|有没有')
+# 问题检测冷却时间（秒），避免短时间内频繁调用 LLM
+_DETECT_COOLDOWN_SEC = 5.0
 
 
 class SessionManager:
@@ -75,6 +75,9 @@ class SessionManager:
 
         # 最近检测到的问题（用于去重）
         self._recent_questions: deque[str] = deque(maxlen=20)
+
+        # 问题检测冷却时间戳
+        self._last_detect_time: float = 0.0
 
         # 回调
         self.on_transcript_update: Callable[[TranscriptSegment], None] | None = None
@@ -256,9 +259,11 @@ class SessionManager:
         if self.settings.llm_filter_teacher_only and segment.speaker_role != SpeakerRole.TEACHER:
             return
 
-        # 本地预过滤：无疑问特征时跳过 LLM 调用
-        if not _QUESTION_KEYWORDS.search(segment.text):
+        # 冷却防抖：避免短时间内频繁调用 LLM
+        now = time.monotonic()
+        if now - self._last_detect_time < _DETECT_COOLDOWN_SEC:
             return
+        self._last_detect_time = now
 
         def _detect():
             context = self.transcript_mgr.get_context_text(
