@@ -165,6 +165,7 @@ class MainWindow(QMainWindow):
         self.sig_error.connect(self._on_error)
         self.sig_active_qa.connect(self._question_input.add_answer)
         self._question_input.question_submitted.connect(self._on_user_question)
+        self._question_input.settings_changed.connect(self._on_qa_settings_changed)
         self._answer_view.copy_to_clipboard.connect(self._copy_text)
 
     def _connect_session_callbacks(self) -> None:
@@ -175,6 +176,16 @@ class MainWindow(QMainWindow):
         sm.on_status_changed = lambda s: self.sig_status.emit(s)
         sm.on_error = lambda e: self.sig_error.emit(e)
         sm.on_active_qa_answer = lambda qa: self.sig_active_qa.emit(qa)
+
+        # 初始化提问面板的控件状态
+        self._question_input.apply_settings(
+            qa_model=self._session_mgr.settings.get("qa_model", "qwen3.5-plus"),
+            qa_enable_thinking=self._session_mgr.settings.get("qa_enable_thinking", False),
+        )
+
+    def _on_qa_settings_changed(self, key: str, value: object) -> None:
+        """提问面板设置变更。"""
+        self._session_mgr.settings.set(key, value)
 
     # ── 控制操作 ──
 

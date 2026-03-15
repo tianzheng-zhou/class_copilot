@@ -84,7 +84,7 @@ QPushButton#secondary_btn:checked {
 }
 
 /* 输入框 */
-QLineEdit, QTextEdit, QPlainTextEdit {
+QLineEdit, QTextEdit, QPlainTextEdit, QTextBrowser {
     background-color: #2d2d2d;
     color: #d4d4d4;
     border: 1px solid #3c3c3c;
@@ -93,7 +93,7 @@ QLineEdit, QTextEdit, QPlainTextEdit {
     selection-background-color: #264f78;
 }
 
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QTextBrowser:focus {
     border-color: #0e639c;
 }
 

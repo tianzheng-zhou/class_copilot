@@ -24,6 +24,12 @@ LLM_MODEL_FLASH = "qwen3.5-flash"
 LLM_MODEL_PLUS = "qwen3.5-plus"
 LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
+# 提问可选模型
+QA_MODEL_CHOICES = {
+    "qwen3.5-flash": "千问3.5-Flash（快速，成本低）",
+    "qwen3.5-plus": "千问3.5-Plus（更强，成本高）",
+}
+
 # 默认快捷键
 DEFAULT_HOTKEYS = {
     "toggle_listen": "<ctrl>+<shift>+s",

@@ -19,6 +19,8 @@ _DEFAULT_SETTINGS = {
     "storage_path": "",
     "hotkeys": dict(DEFAULT_HOTKEYS),
     "llm_filter_teacher_only": True,
+    "qa_model": "qwen3.5-plus",
+    "qa_enable_thinking": False,
 }
 
 

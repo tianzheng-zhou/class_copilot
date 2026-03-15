@@ -9,7 +9,6 @@ from typing import Callable
 
 from src.asr.audio_capture import AudioCapture
 from src.asr.dashscope_asr import TranscriptResult, create_asr_client
-from src.config.constants import LLM_MODEL_PLUS
 from src.config.settings import Settings
 from src.core.speaker_manager import SpeakerManager
 from src.core.transcript import TranscriptManager
@@ -302,9 +301,12 @@ class SessionManager:
     # ── 主动问答 ──
 
     def ask_question(self, user_question: str) -> None:
-        """用户主动提问（使用 qwen3.5-plus）。"""
+        """用户主动提问。"""
         if not self._qwen or not self._session:
             return
+
+        qa_model = self.settings.get("qa_model", "qwen3.5-plus")
+        enable_thinking = self.settings.get("qa_enable_thinking", False)
 
         def _ask():
             context = self.transcript_mgr.get_context_text(teacher_only=False)
@@ -318,7 +320,10 @@ class SessionManager:
                 {"role": "user", "content": f"课堂内容：\n{context[-3000:]}\n\n我的问题：{user_question}"},
             ]
 
-            answer = self._qwen.chat(messages, model=LLM_MODEL_PLUS, temperature=0.7, max_tokens=2048)
+            answer = self._qwen.chat(
+                messages, model=qa_model, temperature=0.7,
+                max_tokens=2048, enable_thinking=enable_thinking,
+            )
 
             qa = ActiveQA(
                 session_id=self._session.id,

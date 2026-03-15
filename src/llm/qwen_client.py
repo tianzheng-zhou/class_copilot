@@ -24,15 +24,20 @@ class QwenClient:
         model: str = LLM_MODEL_FLASH,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        enable_thinking: bool = False,
     ) -> str:
         """同步调用 LLM。"""
         try:
-            resp = self._client.chat.completions.create(
+            kwargs: dict = dict(
                 model=model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            # enable_thinking 非 OpenAI 标准参数，需通过 extra_body 传入
+            if enable_thinking:
+                kwargs["extra_body"] = {"enable_thinking": True}
+            resp = self._client.chat.completions.create(**kwargs)
             return resp.choices[0].message.content or ""
         except Exception as e:
             logger.error("LLM 调用失败: %s", e)
@@ -44,19 +49,28 @@ class QwenClient:
         model: str = LLM_MODEL_FLASH,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        enable_thinking: bool = False,
     ):
-        """流式调用 LLM，返回生成器。"""
+        """流式调用 LLM，返回生成器。yield (type, text)，type 为 'thinking' 或 'content'。"""
         try:
-            stream = self._client.chat.completions.create(
+            kwargs: dict = dict(
                 model=model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
             )
+            if enable_thinking:
+                kwargs["extra_body"] = {"enable_thinking": True}
+            stream = self._client.chat.completions.create(**kwargs)
             for chunk in stream:
+                if not chunk.choices:
+                    continue
                 delta = chunk.choices[0].delta
+                # 深度思考内容通过 reasoning_content 字段返回
+                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    yield ("thinking", delta.reasoning_content)
                 if delta.content:
-                    yield delta.content
+                    yield ("content", delta.content)
         except Exception as e:
             logger.error("LLM 流式调用失败: %s", e)
