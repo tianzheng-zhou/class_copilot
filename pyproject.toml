@@ -11,6 +11,7 @@ dependencies = [
     "cryptography>=42.0.0",
     "pynput>=1.7.6",
     "winotify>=1.1.0",
+    "lameenc>=1.7.0",
 ]
 
 [project.optional-dependencies]

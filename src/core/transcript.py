@@ -23,6 +23,11 @@ class TranscriptManager:
         self._current_session_id = session_id
         self._segments.clear()
 
+    def load_from_db(self, session_id: int) -> None:
+        """从数据库恢复历史片段到内存（用于还原 LLM 上下文）。"""
+        self._segments = self._db.get_segments(session_id, final_only=True)
+        self._current_session_id = session_id
+
     def add_segment(self, seg: TranscriptSegment) -> TranscriptSegment:
         """添加转写片段，仅持久化最终结果。"""
         if self._current_session_id:

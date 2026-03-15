@@ -405,6 +405,50 @@ class SessionManager:
     def get_history_sessions(self) -> list[ClassSession]:
         return self.db.list_sessions()
 
+    def resume_session(self, session_id: int) -> bool:
+        """续记：恢复一个已停止的历史会话。"""
+        if self._is_listening:
+            return False
+
+        session = self.db.get_session(session_id)
+        if not session:
+            return False
+
+        api_key = self.settings.get_api_key(Settings.DASHSCOPE_API_KEY)
+        if not api_key:
+            if self.on_error:
+                self.on_error("阿里云百炼 API Key 未配置")
+            return False
+
+        # 恢复会话对象
+        self._session = session
+        self._session.status = SessionStatus.RECORDING
+        self.db.update_session_status(session_id, SessionStatus.RECORDING)
+
+        # 从数据库加载历史转写内容到内存，恢复 LLM 上下文
+        self.transcript_mgr.load_from_db(session_id)
+
+        # 续录：生成新的分段音频文件
+        self.audio_storage.start_recording_continuation(
+            session_id, session.course_name, session.date
+        )
+
+        # 启动 ASR
+        self._start_asr(session.course_name)
+
+        # 启动音频采集
+        self._audio_capture = AudioCapture(
+            device_index=self.settings.microphone_index,
+            on_audio_chunk=self._on_audio_chunk,
+        )
+        self._audio_capture.start()
+
+        self._is_listening = True
+        if self.on_status_changed:
+            self.on_status_changed("正在续记")
+        logger.info("续记会话已开始: %s (id=%d)", session.course_name, session_id)
+        return True
+
     def cleanup(self) -> None:
         """清理资源。"""
         self.stop_session()

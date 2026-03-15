@@ -280,6 +280,32 @@ class MainWindow(QMainWindow):
     def _show_history(self) -> None:
         dialog = HistoryView(self._session_mgr, self)
         dialog.exec()
+        if dialog.resume_session_id is not None:
+            self._resume_session(dialog.resume_session_id)
+
+    def _resume_session(self, session_id: int) -> None:
+        """续记一个历史会话。"""
+        if self._session_mgr.is_listening:
+            self._on_error("请先停止当前会话再续记")
+            return
+        if not self._session_mgr.settings.has_api_key("dashscope_api_key"):
+            self._on_error("请先在设置中配置阿里云百炼 API Key")
+            self._show_settings()
+            return
+
+        # 先把历史片段加载进转写视图
+        segments = self._session_mgr.db.get_segments(session_id, final_only=True)
+        self._transcript_view.load_history(segments)
+
+        success = self._session_mgr.resume_session(session_id)
+        if success:
+            session = self._session_mgr.current_session
+            if session:
+                self._course_combo.setCurrentText(session.course_name)
+            self._listen_btn.setText("停止")
+            self._tray.set_listening(True)
+            # 切到转写 Tab
+            self._tabs.setCurrentIndex(0)
 
     def _mark_teacher(self) -> None:
         # 简化：弹窗让用户输入说话人标签号

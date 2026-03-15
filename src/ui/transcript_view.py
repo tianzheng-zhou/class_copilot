@@ -95,5 +95,47 @@ class TranscriptView(QWidget):
             trans_fmt.setFontItalic(True)
             cursor.insertText(f"\n  {segment.translation}", trans_fmt)
 
+    def load_history(self, segments: list[TranscriptSegment]) -> None:
+        """续记时，将历史片段以浅色显示，并添加分隔线。"""
+        self._text_edit.clear()
+        self._pending_block_start = None
+        if not segments:
+            return
+
+        cursor = self._text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        # 历史记录标题
+        title_fmt = QTextCharFormat()
+        title_fmt.setForeground(QColor("#555555"))
+        title_fmt.setFontItalic(True)
+        cursor.insertText("── 历史记录 ──", title_fmt)
+
+        for seg in segments:
+            # 说话人标签（历史，颜色更暗）
+            label_fmt = QTextCharFormat()
+            label_fmt.setFontWeight(700)
+            if seg.speaker_role == SpeakerRole.TEACHER:
+                label_fmt.setForeground(QColor("#2d6e60"))
+                label_text = "教师"
+            else:
+                label_fmt.setForeground(QColor("#2d4f6e"))
+                label_text = seg.speaker_label or "未知"
+            cursor.insertText(f"\n{label_text}: ", label_fmt)
+
+            # 文本内容
+            text_fmt = QTextCharFormat()
+            text_fmt.setForeground(QColor("#555555"))
+            cursor.insertText(seg.text, text_fmt)
+
+        # 续记分隔线
+        sep_fmt = QTextCharFormat()
+        sep_fmt.setForeground(QColor("#0e639c"))
+        sep_fmt.setFontItalic(True)
+        cursor.insertText("\n── 续记开始 ──\n", sep_fmt)
+
+        self._text_edit.setTextCursor(cursor)
+        self._text_edit.ensureCursorVisible()
+
     def clear(self) -> None:
         self._text_edit.clear()

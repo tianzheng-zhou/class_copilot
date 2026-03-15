@@ -27,6 +27,7 @@ Thumbs.db
 data/
 *.db
 *.wav
+*.mp3
 *.pcm
 *.opus
 
