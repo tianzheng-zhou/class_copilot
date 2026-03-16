@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from src.config.constants import DEFAULT_HOTKEYS, DB_FILENAME
@@ -35,6 +36,7 @@ class Settings:
 
         self._settings_path = self._config_dir / "settings.json"
         self._vault = KeyVault(self._config_dir / "vault.json")
+        self._lock = threading.Lock()
         self._data: dict = {}
         self._load()
 
@@ -58,11 +60,19 @@ class Settings:
     # ── 通用 getter / setter ──
 
     def get(self, key: str, default=None):
-        return self._data.get(key, default)
+        with self._lock:
+            return self._data.get(key, default)
 
     def set(self, key: str, value) -> None:
-        self._data[key] = value
-        self._save()
+        with self._lock:
+            self._data[key] = value
+            self._save()
+
+    def set_batch(self, updates: dict) -> None:
+        """批量更新设置，只保存一次。"""
+        with self._lock:
+            self._data.update(updates)
+            self._save()
 
     # ── API Keys（加密存储）──
 

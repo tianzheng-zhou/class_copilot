@@ -19,16 +19,20 @@ class TranscriptManager:
         self._db = db
         self._segments: deque[TranscriptSegment] = deque(maxlen=500)
         self._current_session_id: int | None = None
+        self._cached_context: str | None = None
+        self._cached_context_teacher_only: bool = True
 
     def set_session(self, session_id: int) -> None:
         self._current_session_id = session_id
         self._segments.clear()
+        self._cached_context = None
 
     def load_from_db(self, session_id: int) -> None:
         """从数据库恢复历史片段到内存（用于还原 LLM 上下文）。"""
         segments = self._db.get_segments(session_id, final_only=True)
         self._segments = deque(segments, maxlen=500)
         self._current_session_id = session_id
+        self._cached_context = None
 
     def add_segment(self, seg: TranscriptSegment) -> TranscriptSegment:
         """添加转写片段，仅持久化最终结果。"""
@@ -37,10 +41,15 @@ class TranscriptManager:
         if seg.is_final:
             seg.id = self._db.add_segment(seg)
             self._segments.append(seg)
+            self._cached_context = None  # 失效缓存
         return seg
 
     def get_context_text(self, max_chars: int = 3000, teacher_only: bool = True) -> str:
         """获取上下文文本。"""
+        if (self._cached_context is not None
+                and self._cached_context_teacher_only == teacher_only):
+            return self._cached_context
+
         parts = []
         total = 0
         for seg in reversed(self._segments):
@@ -56,7 +65,10 @@ class TranscriptManager:
                 break
             parts.insert(0, text)
             total += len(text)
-        return "\n".join(parts)
+        result = "\n".join(parts)
+        self._cached_context = result
+        self._cached_context_teacher_only = teacher_only
+        return result
 
     def get_recent_text(self, n_segments: int = 5) -> str:
         """获取最近几段转写文本。"""
@@ -69,3 +81,4 @@ class TranscriptManager:
     def clear(self) -> None:
         self._segments.clear()
         self._current_session_id = None
+        self._cached_context = None

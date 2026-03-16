@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
@@ -188,17 +189,31 @@ class SettingsDialog(QDialog):
         if self._dashscope_key.text():
             self.settings.set_api_key(Settings.DASHSCOPE_API_KEY, self._dashscope_key.text())
 
-        # 保存通用设置
-        self.settings.set("microphone_index", self._mic_combo.currentData())
-        self.settings.set("asr_model", self._asr_combo.currentData())
-        self.settings.set("language", self._lang_combo.currentData())
-        self.settings.set("answer_mode_concise", self._concise_check.isChecked())
-        self.settings.set("answer_mode_detailed", self._detailed_check.isChecked())
-        self.settings.set("translation_enabled", self._translate_check.isChecked())
-        self.settings.set("bilingual_display", self._bilingual_check.isChecked())
+        # 存储路径变更警告
+        new_storage = self._storage_path.text().strip()
+        old_storage = self.settings.get("storage_path", "")
+        if new_storage and new_storage != old_storage:
+            ret = QMessageBox.warning(
+                self, "存储路径变更",
+                "更改存储路径后需重启应用，旧数据不会自动迁移。\n是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ret != QMessageBox.StandardButton.Yes:
+                return
 
-        storage = self._storage_path.text().strip()
-        if storage:
-            self.settings.set("storage_path", storage)
+        # 批量保存通用设置（只写入一次文件）
+        updates = {
+            "microphone_index": self._mic_combo.currentData(),
+            "asr_model": self._asr_combo.currentData(),
+            "language": self._lang_combo.currentData(),
+            "answer_mode_concise": self._concise_check.isChecked(),
+            "answer_mode_detailed": self._detailed_check.isChecked(),
+            "translation_enabled": self._translate_check.isChecked(),
+            "bilingual_display": self._bilingual_check.isChecked(),
+        }
+        if new_storage:
+            updates["storage_path"] = new_storage
+        self.settings.set_batch(updates)
 
         self.accept()

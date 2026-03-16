@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import logging
 
-from PyQt6.QtCore import QPoint, QSize, Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QCloseEvent, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
     sig_status = pyqtSignal(str)
     sig_error = pyqtSignal(str)
     sig_active_qa = pyqtSignal(object)
+    _sig_hotkey = pyqtSignal(str)
 
     def __init__(self, session_mgr: SessionManager) -> None:
         super().__init__()
@@ -55,6 +57,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._connect_session_callbacks()
         self._load_course_history()
+        self._restore_geometry()
 
     def _init_ui(self) -> None:
         self.setWindowTitle("听课助手")
@@ -171,6 +174,7 @@ class MainWindow(QMainWindow):
         self._answer_view.manual_detect_requested.connect(self._on_manual_detect)
         self._answer_view.manual_question_submitted.connect(self._on_manual_question)
         self._answer_view.force_answer_requested.connect(self._on_force_answer)
+        self._sig_hotkey.connect(self._handle_hotkey)
 
     def _connect_session_callbacks(self) -> None:
         sm = self._session_mgr
@@ -195,6 +199,7 @@ class MainWindow(QMainWindow):
 
     def _load_course_history(self) -> None:
         """从历史会话中加载课程名并填充到 ComboBox。"""
+        self._course_combo.clear()
         sessions = self._session_mgr.get_history_sessions()
         courses = list(dict.fromkeys(s.course_name for s in sessions if s.course_name))
         self._course_combo.addItems(courses)
@@ -226,17 +231,14 @@ class MainWindow(QMainWindow):
     def _toggle_stay_on_top(self) -> None:
         self._stay_on_top = not self._stay_on_top
         self._pin_btn.setChecked(self._stay_on_top)
-        pos = self.pos()
-        size = self.size()
-        was_visible = self.isVisible()
-        if self._stay_on_top:
-            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        else:
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
-        self.resize(size)
-        self.move(pos)
-        if was_visible:
-            self.show()
+        # 使用 Windows API 直接设置 TOPMOST 标志，避免重建窗口导致闪烁
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+        hwnd = int(self.winId())
+        flag = HWND_TOPMOST if self._stay_on_top else HWND_NOTOPMOST
+        ctypes.windll.user32.SetWindowPos(hwnd, flag, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
 
     def _toggle_visibility(self) -> None:
         if self.isVisible():
@@ -347,31 +349,57 @@ class MainWindow(QMainWindow):
             self._session_mgr.mark_current_speaker_as_teacher(label.strip())
             self._status_label.setText(f"已将说话人 {label} 标记为教师")
 
-    # ── 快捷键操作 ──
+    # ── 快捷键操作（通过 Qt 信号中转到主线程）──
 
-    def hotkey_toggle_listen(self) -> None:
-        self._toggle_listen()
+    @pyqtSlot(str)
+    def _handle_hotkey(self, action: str) -> None:
+        """在主线程中处理快捷键动作。"""
+        dispatch = {
+            "toggle_listen": self._toggle_listen,
+            "manual_question": lambda: self._session_mgr.manual_detect_question(),
+            "toggle_window": self._toggle_visibility,
+            "copy_answer": self._copy_latest_answer,
+            "toggle_answer_mode": lambda: self._answer_view.toggle_latest_answer_mode(),
+            "active_question": self._hotkey_focus_question,
+            "toggle_llm_filter": self._toggle_llm_filter,
+        }
+        handler = dispatch.get(action)
+        if handler:
+            handler()
 
-    def hotkey_manual_question(self) -> None:
-        self._session_mgr.manual_detect_question()
-
-    def hotkey_toggle_window(self) -> None:
-        self._toggle_visibility()
-
-    def hotkey_copy_answer(self) -> None:
-        self._copy_latest_answer()
-
-    def hotkey_toggle_answer_mode(self) -> None:
-        self._answer_view.toggle_latest_answer_mode()
-
-    def hotkey_active_question(self) -> None:
+    def _hotkey_focus_question(self) -> None:
         self.show()
         self.activateWindow()
-        self._tabs.setCurrentIndex(2)  # 提问 Tab
+        self._tabs.setCurrentIndex(2)
         self._question_input.focus_input()
 
+    def _toggle_llm_filter(self) -> None:
+        """切换 LLM 过滤模式（只教师 / 全部）。"""
+        current = self._session_mgr.settings.llm_filter_teacher_only
+        self._session_mgr.settings.set("llm_filter_teacher_only", not current)
+        mode = "只教师" if not current else "全部"
+        self._status_label.setText(f"LLM 过滤模式: {mode}")
+
+    def hotkey_toggle_listen(self) -> None:
+        self._sig_hotkey.emit("toggle_listen")
+
+    def hotkey_manual_question(self) -> None:
+        self._sig_hotkey.emit("manual_question")
+
+    def hotkey_toggle_window(self) -> None:
+        self._sig_hotkey.emit("toggle_window")
+
+    def hotkey_copy_answer(self) -> None:
+        self._sig_hotkey.emit("copy_answer")
+
+    def hotkey_toggle_answer_mode(self) -> None:
+        self._sig_hotkey.emit("toggle_answer_mode")
+
+    def hotkey_active_question(self) -> None:
+        self._sig_hotkey.emit("active_question")
+
     def hotkey_toggle_filter(self) -> None:
-        pass  # 过滤功能暂未启用
+        self._sig_hotkey.emit("toggle_llm_filter")
 
     # ── 状态回调 ──
 
@@ -386,12 +414,25 @@ class MainWindow(QMainWindow):
 
     # ── 窗口事件 ──
 
+    def _restore_geometry(self) -> None:
+        """恢复上次关闭时的窗口位置和大小。"""
+        settings = QSettings("class_copilot", "main_window")
+        geo = settings.value("geometry")
+        if geo:
+            self.restoreGeometry(geo)
+
     def closeEvent(self, event: QCloseEvent) -> None:
+        # 保存窗口位置大小
+        settings = QSettings("class_copilot", "main_window")
+        settings.setValue("geometry", self.saveGeometry())
         # 关闭时最小化到托盘而不是退出
         event.ignore()
         self.hide()
 
     def _quit(self) -> None:
+        # 保存窗口位置大小
+        settings = QSettings("class_copilot", "main_window")
+        settings.setValue("geometry", self.saveGeometry())
         self._session_mgr.cleanup()
         self._tray.hide()
         QApplication.quit()

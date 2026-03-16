@@ -2,13 +2,17 @@
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("class_copilot.log", encoding="utf-8"),
+        RotatingFileHandler(
+            "class_copilot.log", maxBytes=5 * 1024 * 1024, backupCount=3,
+            encoding="utf-8",
+        ),
     ],
 )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from html import escape as html_escape
 
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
@@ -20,45 +21,72 @@ from PyQt6.QtWidgets import (
 from src.config.constants import QA_MODEL_CHOICES
 from src.storage.models import ActiveQA
 
+# 预编译正则表达式
+_RE_CODE_BLOCK = re.compile(
+    r"```(\w*)\n(.*?)```", re.DOTALL
+)
+_RE_INLINE_CODE = re.compile(r"`([^`]+)`")
+_RE_H3 = re.compile(r"^### (.+)$", re.MULTILINE)
+_RE_H2 = re.compile(r"^## (.+)$", re.MULTILINE)
+_RE_H1 = re.compile(r"^# (.+)$", re.MULTILINE)
+_RE_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_RE_ITALIC = re.compile(r"\*(.+?)\*")
+_RE_UL = re.compile(r"^[-*] (.+)$", re.MULTILINE)
+_RE_OL = re.compile(r"^\d+\. (.+)$", re.MULTILINE)
+_RE_BR_BEFORE_LI = re.compile(r"<br>(<li>)")
+_RE_BR_AFTER_LI = re.compile(r"(</li>)<br>")
+
 
 def _md_to_html(text: str) -> str:
     """简易 Markdown → HTML 转换（无需第三方库）。"""
-    html = text
+    # 先提取代码块，防止内部被其他规则干扰
+    code_blocks: list[str] = []
 
-    # 代码块 ```...```
-    html = re.sub(
-        r"```(\w*)\n(.*?)```",
-        lambda m: f'<pre style="background:#2d2d2d;padding:8px;border-radius:4px;'
-                  f'overflow-x:auto;font-family:Consolas,monospace;font-size:12px;'
-                  f'color:#d4d4d4;"><code>{m.group(2).replace("<", "&lt;").replace(">", "&gt;")}</code></pre>',
+    def _replace_code_block(m: re.Match) -> str:
+        escaped = html_escape(m.group(2))
+        placeholder = f"\x00CODEBLOCK{len(code_blocks)}\x00"
+        code_blocks.append(
+            f'<pre style="background:#2d2d2d;padding:8px;border-radius:4px;'
+            f'overflow-x:auto;font-family:Consolas,monospace;font-size:12px;'
+            f'color:#d4d4d4;"><code>{escaped}</code></pre>'
+        )
+        return placeholder
+
+    html = _RE_CODE_BLOCK.sub(_replace_code_block, text)
+
+    # 行内代码（转义内容）
+    html = _RE_INLINE_CODE.sub(
+        lambda m: f'<code style="background:#2d2d2d;padding:1px 4px;border-radius:3px;'
+                  f'font-family:Consolas,monospace;font-size:12px;">'
+                  f'{html_escape(m.group(1))}</code>',
         html,
-        flags=re.DOTALL,
     )
 
-    # 行内代码
-    html = re.sub(r"`([^`]+)`", r'<code style="background:#2d2d2d;padding:1px 4px;border-radius:3px;font-family:Consolas,monospace;font-size:12px;">\1</code>', html)
-
     # 标题 h1-h3
-    html = re.sub(r"^### (.+)$", r"<h4>\1</h4>", html, flags=re.MULTILINE)
-    html = re.sub(r"^## (.+)$", r"<h3>\1</h3>", html, flags=re.MULTILINE)
-    html = re.sub(r"^# (.+)$", r"<h2>\1</h2>", html, flags=re.MULTILINE)
+    html = _RE_H3.sub(r"<h4>\1</h4>", html)
+    html = _RE_H2.sub(r"<h3>\1</h3>", html)
+    html = _RE_H1.sub(r"<h2>\1</h2>", html)
 
     # 加粗 / 斜体
-    html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html)
-    html = re.sub(r"\*(.+?)\*", r"<i>\1</i>", html)
+    html = _RE_BOLD.sub(r"<b>\1</b>", html)
+    html = _RE_ITALIC.sub(r"<i>\1</i>", html)
 
     # 无序列表
-    html = re.sub(r"^[-*] (.+)$", r"<li>\1</li>", html, flags=re.MULTILINE)
+    html = _RE_UL.sub(r"<li>\1</li>", html)
 
     # 有序列表
-    html = re.sub(r"^\d+\. (.+)$", r"<li>\1</li>", html, flags=re.MULTILINE)
+    html = _RE_OL.sub(r"<li>\1</li>", html)
 
     # 换行
     html = html.replace("\n", "<br>")
 
     # 清理连续 <br> 在 <li> 前后
-    html = re.sub(r"<br>(<li>)", r"\1", html)
-    html = re.sub(r"(</li>)<br>", r"\1", html)
+    html = _RE_BR_BEFORE_LI.sub(r"\1", html)
+    html = _RE_BR_AFTER_LI.sub(r"\1", html)
+
+    # 还原代码块
+    for i, block in enumerate(code_blocks):
+        html = html.replace(f"\x00CODEBLOCK{i}\x00", block)
 
     return html
 

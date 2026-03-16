@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from datetime import datetime
@@ -17,7 +18,12 @@ from src.storage.models import (
     TranscriptSegment,
 )
 
-_CREATE_TABLES_SQL = """
+logger = logging.getLogger(__name__)
+
+# 版本化迁移脚本列表，每个元素对应一个数据库版本
+_MIGRATIONS = [
+    # v1: 初始 schema
+    """\
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     course_name TEXT NOT NULL DEFAULT '',
@@ -71,7 +77,14 @@ CREATE TABLE IF NOT EXISTS speakers (
     course_name TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
-"""
+""",
+    # v2: 添加索引
+    """\
+CREATE INDEX IF NOT EXISTS idx_segments_session ON transcript_segments(session_id, start_time_ms);
+CREATE INDEX IF NOT EXISTS idx_questions_session ON detected_questions(session_id);
+CREATE INDEX IF NOT EXISTS idx_active_qa_session ON active_qa(session_id);
+""",
+]
 
 
 class Database:
@@ -93,14 +106,15 @@ class Database:
         return self._conn
 
     def initialize(self) -> None:
-        self.conn.executescript(_CREATE_TABLES_SQL)
-        # 添加索引以提升按 session_id 查询的性能
-        self.conn.executescript("""
-            CREATE INDEX IF NOT EXISTS idx_segments_session ON transcript_segments(session_id, start_time_ms);
-            CREATE INDEX IF NOT EXISTS idx_questions_session ON detected_questions(session_id);
-            CREATE INDEX IF NOT EXISTS idx_active_qa_session ON active_qa(session_id);
-        """)
-        self.conn.commit()
+        """初始化数据库，执行版本化迁移。"""
+        cur_version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        target_version = len(_MIGRATIONS)
+        if cur_version < target_version:
+            for i in range(cur_version, target_version):
+                logger.info("数据库迁移: v%d -> v%d", i, i + 1)
+                self.conn.executescript(_MIGRATIONS[i])
+            self.conn.execute(f"PRAGMA user_version = {target_version}")
+            self.conn.commit()
 
     def close(self) -> None:
         with self._lock:
@@ -145,13 +159,15 @@ class Database:
             self.conn.commit()
 
     def get_session(self, session_id: int) -> ClassSession | None:
-        row = self.conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
         if not row:
             return None
         return self._row_to_session(row)
 
     def list_sessions(self) -> list[ClassSession]:
-        rows = self.conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
+        with self._lock:
+            rows = self.conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
         return [self._row_to_session(r) for r in rows]
 
     def delete_session(self, session_id: int) -> None:
@@ -212,8 +228,9 @@ class Database:
         sql = "SELECT * FROM transcript_segments WHERE session_id=?"
         if final_only:
             sql += " AND is_final=1"
-        sql += " ORDER BY start_time_ms"
-        rows = self.conn.execute(sql, (session_id,)).fetchall()
+        sql += " ORDER BY start_time_ms, created_at"
+        with self._lock:
+            rows = self.conn.execute(sql, (session_id,)).fetchall()
         return [
             TranscriptSegment(
                 id=r["id"],
@@ -251,9 +268,10 @@ class Database:
             self.conn.commit()
 
     def get_questions(self, session_id: int) -> list[DetectedQuestion]:
-        rows = self.conn.execute(
-            "SELECT * FROM detected_questions WHERE session_id=? ORDER BY created_at", (session_id,)
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM detected_questions WHERE session_id=? ORDER BY created_at", (session_id,)
+            ).fetchall()
         return [
             DetectedQuestion(
                 id=r["id"],
@@ -279,9 +297,10 @@ class Database:
             return cur.lastrowid  # type: ignore[return-value]
 
     def get_active_qas(self, session_id: int) -> list[ActiveQA]:
-        rows = self.conn.execute(
-            "SELECT * FROM active_qa WHERE session_id=? ORDER BY created_at", (session_id,)
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM active_qa WHERE session_id=? ORDER BY created_at", (session_id,)
+            ).fetchall()
         return [
             ActiveQA(
                 id=r["id"],
@@ -315,20 +334,23 @@ class Database:
             self.conn.commit()
 
     def get_speakers_by_course(self, course_name: str) -> list[Speaker]:
-        rows = self.conn.execute(
-            "SELECT * FROM speakers WHERE course_name=?", (course_name,)
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM speakers WHERE course_name=?", (course_name,)
+            ).fetchall()
         return [self._row_to_speaker(r) for r in rows]
 
     def get_all_speakers(self) -> list[Speaker]:
-        rows = self.conn.execute("SELECT * FROM speakers ORDER BY course_name, name").fetchall()
+        with self._lock:
+            rows = self.conn.execute("SELECT * FROM speakers ORDER BY course_name, name").fetchall()
         return [self._row_to_speaker(r) for r in rows]
 
     def get_teacher_feature_ids(self, course_name: str) -> list[str]:
-        rows = self.conn.execute(
-            "SELECT feature_id FROM speakers WHERE course_name=? AND role='teacher' AND feature_id IS NOT NULL",
-            (course_name,),
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT feature_id FROM speakers WHERE course_name=? AND role='teacher' AND feature_id IS NOT NULL",
+                (course_name,),
+            ).fetchall()
         return [r["feature_id"] for r in rows]
 
     @staticmethod

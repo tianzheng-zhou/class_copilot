@@ -45,6 +45,7 @@ class AnswerGenerator:
 
     def __init__(self, client: QwenClient) -> None:
         self._client = client
+        self._pool = ThreadPoolExecutor(max_workers=2)
 
     def generate(
         self,
@@ -74,10 +75,9 @@ class AnswerGenerator:
             )},
         ]
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            f_concise = pool.submit(self._client.chat, concise_msgs, LLM_MODEL_FLASH, 0.7)
-            f_detailed = pool.submit(self._client.chat, detailed_msgs, LLM_MODEL_FLASH, 0.7)
-            return f_concise.result(), f_detailed.result()
+        f_concise = self._pool.submit(self._client.chat, concise_msgs, LLM_MODEL_FLASH, 0.7)
+        f_detailed = self._pool.submit(self._client.chat, detailed_msgs, LLM_MODEL_FLASH, 0.7)
+        return f_concise.result(), f_detailed.result()
 
     def generate_concise(self, question: str, context: str, course_name: str = "", language: str = "zh") -> str:
         system = ANSWER_SYSTEM_PROMPT.format(course_name=course_name or "未知课程")

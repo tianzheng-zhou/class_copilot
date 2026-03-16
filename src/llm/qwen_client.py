@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+import time
+from collections.abc import Generator
 
-from openai import OpenAI
+from openai import APIConnectionError, APIError, OpenAI, RateLimitError
 
 from src.config.constants import LLM_BASE_URL, LLM_MODEL_FLASH, LLM_MODEL_PLUS
 
@@ -25,23 +26,33 @@ class QwenClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         enable_thinking: bool = False,
+        retries: int = 2,
     ) -> str:
-        """同步调用 LLM。"""
-        try:
-            kwargs: dict = dict(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                # enable_thinking 非 OpenAI 标准参数，需通过 extra_body 传入
-                # qwen3.5 系列默认开启思考，必须显式传 False 才能关闭
-                extra_body={"enable_thinking": enable_thinking},
-            )
-            resp = self._client.chat.completions.create(**kwargs)
-            return resp.choices[0].message.content or ""
-        except Exception as e:
-            logger.error("LLM 调用失败: %s", e)
-            return ""
+        """同步调用 LLM，带自动重试。"""
+        kwargs: dict = dict(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            extra_body={"enable_thinking": enable_thinking},
+        )
+        for attempt in range(retries + 1):
+            try:
+                resp = self._client.chat.completions.create(**kwargs)
+                return resp.choices[0].message.content or ""
+            except (APIConnectionError, RateLimitError) as e:
+                logger.warning("LLM 调用失败 (尝试 %d/%d): %s", attempt + 1, retries + 1, e)
+                if attempt < retries:
+                    time.sleep(1)
+                else:
+                    return ""
+            except APIError as e:
+                logger.error("LLM API 错误: %s", e)
+                return ""
+            except Exception as e:
+                logger.error("LLM 意外错误: %s", e, exc_info=True)
+                return ""
+        return ""
 
     def chat_stream(
         self,
@@ -50,7 +61,7 @@ class QwenClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         enable_thinking: bool = False,
-    ):
+    ) -> Generator[tuple[str, str], None, None]:
         """流式调用 LLM，返回生成器。yield (type, text)，type 为 'thinking' 或 'content'。"""
         try:
             kwargs: dict = dict(
@@ -66,10 +77,11 @@ class QwenClient:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
-                # 深度思考内容通过 reasoning_content 字段返回
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                     yield ("thinking", delta.reasoning_content)
                 if delta.content:
                     yield ("content", delta.content)
-        except Exception as e:
+        except (APIConnectionError, APIError, RateLimitError) as e:
             logger.error("LLM 流式调用失败: %s", e)
+        except Exception as e:
+            logger.error("LLM 流式调用意外错误: %s", e, exc_info=True)

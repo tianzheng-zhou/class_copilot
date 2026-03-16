@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -72,6 +73,10 @@ class SessionManager:
 
         # 重连定时器引用（用于取消）
         self._reconnect_timer: threading.Timer | None = None
+        self._timer_lock = threading.Lock()
+
+        # 后台任务线程池
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="session")
 
         # 最近检测到的问题（用于去重）
         self._recent_questions: deque[str] = deque(maxlen=20)
@@ -79,7 +84,7 @@ class SessionManager:
         # 问题检测冷却时间戳
         self._last_detect_time: float = 0.0
 
-        # 回调
+        # 回调（注意：这些回调可能在后台线程中被调用，调用方应通过 Qt Signal/Slot 转发到主线程）
         self.on_transcript_update: Callable[[TranscriptSegment], None] | None = None
         self.on_question_detected: Callable[[DetectedQuestion], None] | None = None
         self.on_answer_ready: Callable[[DetectedQuestion], None] | None = None
@@ -149,9 +154,10 @@ class SessionManager:
         self._is_listening = False
 
         # 取消待执行的重连定时器
-        if self._reconnect_timer:
-            self._reconnect_timer.cancel()
-            self._reconnect_timer = None
+        with self._timer_lock:
+            if self._reconnect_timer:
+                self._reconnect_timer.cancel()
+                self._reconnect_timer = None
 
         # 停止音频采集
         if self._audio_capture:
@@ -169,6 +175,10 @@ class SessionManager:
         # 更新会话状态
         if self._session and self._session.id:
             self.db.update_session_status(self._session.id, SessionStatus.STOPPED)
+
+        # 等待后台任务完成（带超时）
+        self._executor.shutdown(wait=True, cancel_futures=True)
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="session")
 
         self.transcript_mgr.clear()
         self._session = None
@@ -214,15 +224,33 @@ class SessionManager:
             is_final=result.is_final,
         )
 
-        # 英文翻译
-        if (self.settings.language == "en" and self._translator
-                and result.is_final and self.settings.get("translation_enabled", True)):
-            segment.translation = self._translator.translate_to_chinese(result.text)
+        # 英文翻译（异步执行，避免阻塞 ASR 回调线程）
+        need_translation = (
+            self.settings.language == "en" and self._translator
+            and result.is_final and self.settings.get("translation_enabled", True)
+        )
 
         segment = self.transcript_mgr.add_segment(segment)
 
         if self.on_transcript_update:
             self.on_transcript_update(segment)
+
+        if need_translation:
+            seg_ref = segment  # 局部变量防止闭包陷阱
+            translator = self._translator
+
+            def _translate():
+                try:
+                    translation = translator.translate_to_chinese(seg_ref.text)
+                    seg_ref.translation = translation
+                    if seg_ref.id:
+                        self.db.update_segment_translation(seg_ref.id, translation)
+                    if self.on_transcript_update:
+                        self.on_transcript_update(seg_ref)
+                except Exception:
+                    logger.debug("翻译失败", exc_info=True)
+
+            self._executor.submit(_translate)
 
         # 自动问题检测（仅处理最终结果）
         if result.is_final:
@@ -244,9 +272,11 @@ class SessionManager:
                 if self._is_listening and self._session:
                     self._start_asr(self._session.course_name)
 
-            timer = threading.Timer(2.0, _reconnect)
-            self._reconnect_timer = timer
-            timer.start()
+            with self._timer_lock:
+                if self._is_listening:
+                    timer = threading.Timer(2.0, _reconnect)
+                    self._reconnect_timer = timer
+                    timer.start()
 
     # ── 问题检测 ──
 
@@ -276,7 +306,7 @@ class SessionManager:
                 question_text = result.get("question_text", segment.text)
                 self._handle_detected_question(question_text, source="auto")
 
-        threading.Thread(target=_detect, daemon=True).start()
+        self._executor.submit(_detect)
 
     def manual_detect_question(self) -> None:
         """手动触发问题检测。"""
@@ -301,7 +331,7 @@ class SessionManager:
                 if self.on_status_changed:
                     self.on_status_changed("未在最近转写中检测到问题")
 
-        threading.Thread(target=_detect, daemon=True).start()
+        self._executor.submit(_detect)
 
     def submit_question(self, question_text: str) -> None:
         """手动提交问题文本，直接生成答案。"""
@@ -356,7 +386,7 @@ class SessionManager:
             if self.on_answer_ready:
                 self.on_answer_ready(question)
 
-        threading.Thread(target=_generate, daemon=True).start()
+        self._executor.submit(_generate)
 
     def _handle_detected_question(self, question_text: str, source: str) -> None:
         """处理检测到的问题：通知 + 生成答案。"""
@@ -386,17 +416,33 @@ class SessionManager:
         if self.on_question_detected:
             self.on_question_detected(question)
 
-        # 生成答案
+        # 生成答案（根据答案模式设置决定生成哪些版本）
+        mode_concise = self.settings.answer_mode_concise
+        mode_detailed = self.settings.answer_mode_detailed
+        language = self.settings.language
+
         def _generate():
             context = self.transcript_mgr.get_context_text(
                 teacher_only=self.settings.llm_filter_teacher_only
             )
-            concise, detailed = self._answer_generator.generate(
-                question=question_text,
-                context=context,
-                course_name=course_name,
-                language=self.settings.language,
-            )
+            concise, detailed = "", ""
+            if mode_concise and mode_detailed:
+                concise, detailed = self._answer_generator.generate(
+                    question=question_text,
+                    context=context,
+                    course_name=course_name,
+                    language=language,
+                )
+            elif mode_concise:
+                concise = self._answer_generator.generate_concise(
+                    question=question_text, context=context,
+                    course_name=course_name, language=language,
+                )
+            elif mode_detailed:
+                detailed = self._answer_generator.generate_detailed(
+                    question=question_text, context=context,
+                    course_name=course_name, language=language,
+                )
             question.concise_answer = concise
             question.detailed_answer = detailed
             self.db.update_question_answers(question.id, concise, detailed)
@@ -404,7 +450,7 @@ class SessionManager:
             if self.on_answer_ready:
                 self.on_answer_ready(question)
 
-        threading.Thread(target=_generate, daemon=True).start()
+        self._executor.submit(_generate)
 
     def _is_duplicate_question(self, new_q: str, threshold: float = 0.7) -> bool:
         """检查是否与最近的问题重复。"""
@@ -452,7 +498,7 @@ class SessionManager:
             if self.on_active_qa_answer:
                 self.on_active_qa_answer(qa)
 
-        threading.Thread(target=_ask, daemon=True).start()
+        self._executor.submit(_ask)
 
     # ── 声纹管理 ──
 
@@ -564,10 +610,13 @@ class SessionManager:
         # 从数据库加载历史转写内容到内存，恢复 LLM 上下文
         self.transcript_mgr.load_from_db(session_id)
 
-        # 续录：生成新的分段音频文件
-        self.audio_storage.start_recording_continuation(
+        # 续录：生成新的分段音频文件，并更新数据库中的音频路径
+        new_path = self.audio_storage.start_recording_continuation(
             session_id, session.course_name, session.date
         )
+        existing = session.audio_path
+        combined = f"{existing}|{new_path}" if existing else new_path
+        self.db.update_session_audio_path(session_id, combined)
 
         # 启动 ASR
         self._start_asr(session.course_name)
@@ -588,4 +637,5 @@ class SessionManager:
     def cleanup(self) -> None:
         """清理资源。"""
         self.stop_session()
+        self._executor.shutdown(wait=False, cancel_futures=True)
         self.db.close()

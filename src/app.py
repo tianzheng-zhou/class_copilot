@@ -69,7 +69,9 @@ class App:
 
     def run(self) -> int:
         self.window.show()
-        self._check_first_run()
+        # 使用 QTimer.singleShot 确保在事件循环启动后弹出首次运行对话框
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, self._check_first_run)
         try:
             return self._qt_app.exec()
         finally:
