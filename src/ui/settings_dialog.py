@@ -103,6 +103,16 @@ class SettingsDialog(QDialog):
         asr_hint.setWordWrap(True)
         layout.addRow(asr_hint)
 
+        # 课程热词
+        self._hotwords_input = QLineEdit()
+        self._hotwords_input.setPlaceholderText("例如: Fourier transform, DFT, sampling, 傅里叶变换")
+        layout.addRow("课程热词:", self._hotwords_input)
+
+        hotwords_hint = QLabel("输入课程相关术语（英文逗号分隔），帮助 ASR 更准确地识别专业词汇。\n仅对千问3-ASR 模型生效，切换后重新开始会话生效")
+        hotwords_hint.setStyleSheet("color: #808080; font-size: 11px;")
+        hotwords_hint.setWordWrap(True)
+        layout.addRow(hotwords_hint)
+
         return widget
 
     def _create_general_tab(self) -> QWidget:
@@ -166,6 +176,9 @@ class SettingsDialog(QDialog):
                 self._asr_combo.setCurrentIndex(i)
                 break
 
+        # 热词
+        self._hotwords_input.setText(self.settings.get("hotwords", ""))
+
         # 语言
         lang = self.settings.language
         for i in range(self._lang_combo.count()):
@@ -207,6 +220,7 @@ class SettingsDialog(QDialog):
             "microphone_index": self._mic_combo.currentData(),
             "asr_model": self._asr_combo.currentData(),
             "language": self._lang_combo.currentData(),
+            "hotwords": self._hotwords_input.text().strip(),
             "answer_mode_concise": self._concise_check.isChecked(),
             "answer_mode_detailed": self._detailed_check.isChecked(),
             "translation_enabled": self._translate_check.isChecked(),

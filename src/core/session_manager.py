@@ -199,6 +199,7 @@ class SessionManager:
             model=self.settings.asr_model,
             api_key=api_key,
             language=self.settings.language,
+            hotwords=self.settings.get("hotwords", ""),
             on_result=self._on_asr_result,
             on_error=self._on_asr_error,
             on_connected=lambda: logger.info("ASR [%s] 已连接", self.settings.asr_model),

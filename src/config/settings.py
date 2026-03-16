@@ -13,6 +13,7 @@ _DEFAULT_SETTINGS = {
     "microphone_index": -1,  # -1 = 系统默认
     "language": "zh",  # zh / en
     "asr_model": "qwen3-asr-flash-realtime",  # ASR 模型
+    "hotwords": "",  # 课程热词，逗号分隔
     "answer_mode_concise": True,
     "answer_mode_detailed": True,
     "translation_enabled": True,

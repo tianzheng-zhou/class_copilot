@@ -225,6 +225,7 @@ class QwenASRClient:
         api_key: str,
         model: str = "qwen3-asr-flash-realtime",
         language: str = "zh",
+        hotwords: str = "",
         on_result: Callable[[TranscriptResult], None] | None = None,
         on_error: Callable[[str], None] | None = None,
         on_connected: Callable[[], None] | None = None,
@@ -233,6 +234,7 @@ class QwenASRClient:
         self._api_key = api_key
         self._model = model
         self._language = language
+        self._hotwords = hotwords
         self._on_result = on_result
         self._on_error = on_error
         self._on_connected = on_connected
@@ -342,10 +344,14 @@ class QwenASRClient:
                 sample_rate=AUDIO_SAMPLE_RATE,
                 input_audio_format="pcm",
             )
+            if self._hotwords:
+                transcription_params.corpus_text = self._hotwords
+
             self._conversation.update_session(
                 output_modalities=[MultiModality.TEXT],
                 enable_input_audio_transcription=True,
                 transcription_params=transcription_params,
+                turn_detection_silence_duration_ms=1500,
             )
 
             logger.info("Qwen3-ASR [%s] 启动成功", self._model)
@@ -427,6 +433,7 @@ def create_asr_client(
     model: str,
     api_key: str,
     language: str = "zh",
+    hotwords: str = "",
     on_result: Callable[[TranscriptResult], None] | None = None,
     on_error: Callable[[str], None] | None = None,
     on_connected: Callable[[], None] | None = None,
@@ -436,6 +443,7 @@ def create_asr_client(
     if model in _QWEN_ASR_MODELS:
         return QwenASRClient(
             api_key=api_key, model=model, language=language,
+            hotwords=hotwords,
             on_result=on_result, on_error=on_error,
             on_connected=on_connected, on_disconnected=on_disconnected,
         )
