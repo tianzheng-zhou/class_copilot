@@ -35,7 +35,7 @@ DEFAULT_HOTKEYS = {
     "toggle_listen": "<ctrl>+<shift>+s",
     "manual_question": "<ctrl>+<shift>+q",
     "toggle_window": "<ctrl>+<shift>+h",
-    "copy_answer": "<ctrl>+<shift>+c",
+    "copy_transcript": "<ctrl>+<shift>+c",
     "toggle_answer_mode": "<ctrl>+<shift>+t",
     "active_question": "<ctrl>+<shift>+a",
     "toggle_llm_filter": "<ctrl>+<shift>+f",

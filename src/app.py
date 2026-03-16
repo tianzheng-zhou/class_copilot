@@ -55,9 +55,9 @@ class App:
             self.hotkey_mgr.set_binding(action, key)
 
         self.hotkey_mgr.register("toggle_listen", self.window.hotkey_toggle_listen)
-        self.hotkey_mgr.register("manual_question", self.window.hotkey_manual_question)
+        self.hotkey_mgr.register("manual_question", self.window.hotkey_force_answer)
         self.hotkey_mgr.register("toggle_window", self.window.hotkey_toggle_window)
-        self.hotkey_mgr.register("copy_answer", self.window.hotkey_copy_answer)
+        self.hotkey_mgr.register("copy_transcript", self.window.hotkey_copy_transcript)
         self.hotkey_mgr.register("toggle_answer_mode", self.window.hotkey_toggle_answer_mode)
         self.hotkey_mgr.register("active_question", self.window.hotkey_active_question)
         self.hotkey_mgr.register("toggle_llm_filter", self.window.hotkey_toggle_filter)

@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
 
         # 答案 Tab
         self._answer_view = AnswerView()
-        self._tabs.addTab(self._answer_view, "答案")
+        self._tabs.addTab(self._answer_view, "回答")
 
         # 提问 Tab
         self._question_input = QuestionInput()
@@ -146,10 +146,16 @@ class MainWindow(QMainWindow):
 
         bottom_bar.addStretch()
 
-        self._copy_btn = QPushButton("复制答案")
-        self._copy_btn.setObjectName("secondary_btn")
-        self._copy_btn.clicked.connect(self._copy_latest_answer)
-        bottom_bar.addWidget(self._copy_btn)
+        self._force_answer_btn = QPushButton("回答")
+        self._force_answer_btn.setObjectName("secondary_btn")
+        self._force_answer_btn.setToolTip("基于最近转写内容生成回答（Ctrl+Shift+Q）")
+        self._force_answer_btn.clicked.connect(self._on_force_answer)
+        bottom_bar.addWidget(self._force_answer_btn)
+
+        self._copy_transcript_btn = QPushButton("复制转写")
+        self._copy_transcript_btn.setObjectName("secondary_btn")
+        self._copy_transcript_btn.clicked.connect(self._copy_transcript)
+        bottom_bar.addWidget(self._copy_transcript_btn)
 
         layout.addLayout(bottom_bar)
 
@@ -171,9 +177,7 @@ class MainWindow(QMainWindow):
         self._question_input.question_submitted.connect(self._on_user_question)
         self._question_input.settings_changed.connect(self._on_qa_settings_changed)
         self._answer_view.copy_to_clipboard.connect(self._copy_text)
-        self._answer_view.manual_detect_requested.connect(self._on_manual_detect)
-        self._answer_view.manual_question_submitted.connect(self._on_manual_question)
-        self._answer_view.force_answer_requested.connect(self._on_force_answer)
+
         self._sig_hotkey.connect(self._handle_hotkey)
 
     def _connect_session_callbacks(self) -> None:
@@ -247,8 +251,8 @@ class MainWindow(QMainWindow):
             self.show()
             self.activateWindow()
 
-    def _copy_latest_answer(self) -> None:
-        text = self._answer_view.get_latest_answer()
+    def _copy_transcript(self) -> None:
+        text = self._transcript_view.get_plain_text()
         if text:
             self._copy_text(text)
 
@@ -260,13 +264,6 @@ class MainWindow(QMainWindow):
 
     def _on_user_question(self, question: str) -> None:
         self._session_mgr.ask_question(question)
-
-    def _on_manual_detect(self) -> None:
-        """手动检测问题。"""
-        if not self._session_mgr.is_listening:
-            self._on_error("请先开始监听后再检测问题")
-            return
-        self._session_mgr.manual_detect_question()
 
     def _on_manual_question(self, question: str) -> None:
         """手动输入问题并生成答案。"""
@@ -356,9 +353,9 @@ class MainWindow(QMainWindow):
         """在主线程中处理快捷键动作。"""
         dispatch = {
             "toggle_listen": self._toggle_listen,
-            "manual_question": lambda: self._session_mgr.manual_detect_question(),
+            "manual_question": self._on_force_answer,
             "toggle_window": self._toggle_visibility,
-            "copy_answer": self._copy_latest_answer,
+            "copy_transcript": self._copy_transcript,
             "toggle_answer_mode": lambda: self._answer_view.toggle_latest_answer_mode(),
             "active_question": self._hotkey_focus_question,
             "toggle_llm_filter": self._toggle_llm_filter,
@@ -383,14 +380,14 @@ class MainWindow(QMainWindow):
     def hotkey_toggle_listen(self) -> None:
         self._sig_hotkey.emit("toggle_listen")
 
-    def hotkey_manual_question(self) -> None:
+    def hotkey_force_answer(self) -> None:
         self._sig_hotkey.emit("manual_question")
 
     def hotkey_toggle_window(self) -> None:
         self._sig_hotkey.emit("toggle_window")
 
-    def hotkey_copy_answer(self) -> None:
-        self._sig_hotkey.emit("copy_answer")
+    def hotkey_copy_transcript(self) -> None:
+        self._sig_hotkey.emit("copy_transcript")
 
     def hotkey_toggle_answer_mode(self) -> None:
         self._sig_hotkey.emit("toggle_answer_mode")

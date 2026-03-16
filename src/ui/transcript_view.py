@@ -137,5 +137,9 @@ class TranscriptView(QWidget):
         self._text_edit.setTextCursor(cursor)
         self._text_edit.ensureCursorVisible()
 
+    def get_plain_text(self) -> str:
+        """获取转写内容的纯文本，用于复制。"""
+        return self._text_edit.toPlainText().strip()
+
     def clear(self) -> None:
         self._text_edit.clear()
