@@ -17,6 +17,7 @@ ASR_MODEL_DEFAULT = "qwen3-asr-flash-realtime"
 ASR_MODEL_CHOICES = {
     "fun-asr-realtime": "Fun-ASR（课堂/演讲优化，~1.19元/时）",
     "qwen3-asr-flash-realtime": "千问3-ASR（多语种高精度+情感识别，~1.19元/时）",
+    "qwen3-omni-flash-realtime": "千问3-Omni（全能力多模态，上下文理解更强，成本较高）",
 }
 
 # LLM 模型

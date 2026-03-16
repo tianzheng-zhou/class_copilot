@@ -1,8 +1,9 @@
 """阿里云百炼 DashScope 实时语音识别客户端。
 
-支持两种 ASR 模型：
+支持三种 ASR 模型：
 - fun-asr-realtime: 使用 Recognition SDK，课堂/演讲场景优化
 - qwen3-asr-flash-realtime: 使用 OmniRealtime WebSocket API，多语种高精度
+- qwen-omni-turbo-realtime: 使用 OmniRealtime WebSocket API，全能力多模态模型，上下文理解更强
 """
 
 from __future__ import annotations
@@ -226,6 +227,7 @@ class QwenASRClient:
         model: str = "qwen3-asr-flash-realtime",
         language: str = "zh",
         hotwords: str = "",
+        course_name: str = "",
         on_result: Callable[[TranscriptResult], None] | None = None,
         on_error: Callable[[str], None] | None = None,
         on_connected: Callable[[], None] | None = None,
@@ -235,6 +237,7 @@ class QwenASRClient:
         self._model = model
         self._language = language
         self._hotwords = hotwords
+        self._course_name = course_name
         self._on_result = on_result
         self._on_error = on_error
         self._on_connected = on_connected
@@ -325,6 +328,11 @@ class QwenASRClient:
                                     start_ms=now_ms, end_ms=now_ms,
                                 ))
 
+                    # Omni 模型会自动生成回复，立即取消以节省 token
+                    elif event_type == "response.created" and client._model in _QWEN_OMNI_MODELS:
+                        if client._conversation:
+                            client._conversation.cancel_response()
+
                 except Exception as e:
                     logger.error("Qwen3-ASR 事件处理错误: %s", e)
 
@@ -339,6 +347,13 @@ class QwenASRClient:
             self._conversation.connect()
 
             # 配置为纯 ASR 模式
+            update_kwargs = {
+                "output_modalities": [MultiModality.TEXT],
+                "enable_input_audio_transcription": True,
+                "turn_detection_silence_duration_ms": 3000,
+            }
+
+            # 为所有模型配置转写参数（语言、采样率、热词）
             transcription_params = TranscriptionParams(
                 language=self._language,
                 sample_rate=AUDIO_SAMPLE_RATE,
@@ -346,13 +361,17 @@ class QwenASRClient:
             )
             if self._hotwords:
                 transcription_params.corpus_text = self._hotwords
+            update_kwargs["transcription_params"] = transcription_params
 
-            self._conversation.update_session(
-                output_modalities=[MultiModality.TEXT],
-                enable_input_audio_transcription=True,
-                transcription_params=transcription_params,
-                turn_detection_silence_duration_ms=1500,
-            )
+            # Omni 模型支持 instructions 提示词增强上下文识别
+            if self._model in _QWEN_OMNI_MODELS:
+                update_kwargs["voice"] = "Cherry"
+                instructions = self._build_omni_instructions()
+                if instructions:
+                    update_kwargs["instructions"] = instructions
+                    logger.info("Omni instructions: %s", instructions)
+
+            self._conversation.update_session(**update_kwargs)
 
             logger.info("Qwen3-ASR [%s] 启动成功", self._model)
         except Exception as e:
@@ -361,6 +380,32 @@ class QwenASRClient:
                 self._state = ASRState.ERROR
             if self._on_error:
                 self._on_error(f"ASR 启动失败: {e}")
+
+    def _build_omni_instructions(self) -> str:
+        """Omni 模型的系统提示词，利用课程上下文增强识别质量。"""
+        if self._language == "en":
+            parts = [
+                "You are a highly accurate speech-to-text transcription system for a university lecture in English.",
+                "Your sole task is to transcribe the audio input faithfully and accurately in English.",
+                "Pay special attention to technical terminology, mathematical expressions, and proper nouns.",
+                "Do NOT summarize, paraphrase, or respond to the content. Only transcribe.",
+            ]
+            if self._course_name:
+                parts.append(f"The course is: {self._course_name}.")
+            if self._hotwords:
+                parts.append(f"Key terms that may appear: {self._hotwords}.")
+        else:
+            parts = [
+                "你是一个高精度的大学课堂语音转文字系统，授课语言为中文。",
+                "你的唯一任务是忠实、准确地将音频输入转录为中文文字。",
+                "请特别注意专业术语、数学表达式和专有名词的准确识别。",
+                "不要总结、改写或回应内容，只做逐字转录。",
+            ]
+            if self._course_name:
+                parts.append(f"当前课程是：{self._course_name}。")
+            if self._hotwords:
+                parts.append(f"可能出现的关键术语：{self._hotwords}。")
+        return " ".join(parts)
 
     def _schedule_session_refresh(self) -> None:
         """在会话即将到达 120 分钟上限前主动刷新连接。"""
@@ -426,6 +471,7 @@ class QwenASRClient:
 
 # 模型名到客户端类的映射
 _QWEN_ASR_MODELS = {"qwen3-asr-flash-realtime"}
+_QWEN_OMNI_MODELS = {"qwen3-omni-flash-realtime"}
 _FUNASR_MODELS = {"fun-asr-realtime", "paraformer-realtime-v2"}
 
 
@@ -434,16 +480,17 @@ def create_asr_client(
     api_key: str,
     language: str = "zh",
     hotwords: str = "",
+    course_name: str = "",
     on_result: Callable[[TranscriptResult], None] | None = None,
     on_error: Callable[[str], None] | None = None,
     on_connected: Callable[[], None] | None = None,
     on_disconnected: Callable[[], None] | None = None,
 ) -> FunASRClient | QwenASRClient:
     """根据模型名创建对应的 ASR 客户端。"""
-    if model in _QWEN_ASR_MODELS:
+    if model in _QWEN_ASR_MODELS or model in _QWEN_OMNI_MODELS:
         return QwenASRClient(
             api_key=api_key, model=model, language=language,
-            hotwords=hotwords,
+            hotwords=hotwords, course_name=course_name,
             on_result=on_result, on_error=on_error,
             on_connected=on_connected, on_disconnected=on_disconnected,
         )
