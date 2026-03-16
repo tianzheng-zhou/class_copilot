@@ -18,7 +18,7 @@ class SystemTray(QSystemTrayIcon):
             style = parent.style()
             icon = style.standardIcon(style.StandardPixmap.SP_ComputerIcon) if style else QIcon()
         self.setIcon(icon)
-        self.setToolTip("听课助手")
+        self.setToolTip("copilot")
 
         self._menu = QMenu()
         self._show_action = QAction("显示/隐藏", self)
@@ -62,4 +62,4 @@ class SystemTray(QSystemTrayIcon):
     def set_listening(self, listening: bool) -> None:
         self._start_action.setEnabled(not listening)
         self._stop_action.setEnabled(listening)
-        self.setToolTip("听课助手" + (" - 正在监听" if listening else ""))
+        self.setToolTip("copilot" + (" - 正在监听" if listening else ""))

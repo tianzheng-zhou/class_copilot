@@ -7,6 +7,8 @@ import logging
 import sys
 
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtGui import QIcon
+import os
 
 from src.config.settings import Settings
 from src.core.session_manager import SessionManager
@@ -23,7 +25,10 @@ class App:
 
     def __init__(self) -> None:
         self._qt_app = QApplication(sys.argv)
-        self._qt_app.setApplicationName("听课助手")
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icon.ico")
+        if os.path.exists(icon_path):
+            self._qt_app.setWindowIcon(QIcon(icon_path))
+        self._qt_app.setApplicationName("copilot")
         self._qt_app.setOrganizationName("class_copilot")
         self._qt_app.setStyleSheet(DARK_THEME)
 

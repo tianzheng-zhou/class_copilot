@@ -1,6 +1,6 @@
 """应用常量定义。"""
 
-APP_NAME = "听课助手"
+APP_NAME = "copilot"
 APP_NAME_EN = "class_copilot"
 APP_VERSION = "0.1.0"
 

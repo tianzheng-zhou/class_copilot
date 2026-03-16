@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         self._restore_geometry()
 
     def _init_ui(self) -> None:
-        self.setWindowTitle("听课助手")
+        self.setWindowTitle("copilot")
         self._stay_on_top = True
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint
