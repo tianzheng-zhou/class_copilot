@@ -134,6 +134,7 @@ class FunASRClient:
         self,
         api_key: str,
         model: str = "fun-asr-realtime",
+        language: str = "zh",
         on_result: Callable[[TranscriptResult], None] | None = None,
         on_error: Callable[[str], None] | None = None,
         on_connected: Callable[[], None] | None = None,
@@ -141,6 +142,7 @@ class FunASRClient:
     ) -> None:
         self._api_key = api_key
         self._model = model
+        self._language = language
         self._on_result = on_result
         self._on_error = on_error
         self._on_connected = on_connected
@@ -166,7 +168,7 @@ class FunASRClient:
             format="pcm",
             sample_rate=AUDIO_SAMPLE_RATE,
             callback=callback,
-            language_hints=["zh", "en", "ja"],
+            language_hints=[self._language, "en", "ja"] if self._language == "zh" else [self._language, "zh", "ja"],
         )
 
         try:
@@ -222,6 +224,7 @@ class QwenASRClient:
         self,
         api_key: str,
         model: str = "qwen3-asr-flash-realtime",
+        language: str = "zh",
         on_result: Callable[[TranscriptResult], None] | None = None,
         on_error: Callable[[str], None] | None = None,
         on_connected: Callable[[], None] | None = None,
@@ -229,6 +232,7 @@ class QwenASRClient:
     ) -> None:
         self._api_key = api_key
         self._model = model
+        self._language = language
         self._on_result = on_result
         self._on_error = on_error
         self._on_connected = on_connected
@@ -334,7 +338,7 @@ class QwenASRClient:
 
             # 配置为纯 ASR 模式
             transcription_params = TranscriptionParams(
-                language="zh",
+                language=self._language,
                 sample_rate=AUDIO_SAMPLE_RATE,
                 input_audio_format="pcm",
             )
@@ -422,6 +426,7 @@ _FUNASR_MODELS = {"fun-asr-realtime", "paraformer-realtime-v2"}
 def create_asr_client(
     model: str,
     api_key: str,
+    language: str = "zh",
     on_result: Callable[[TranscriptResult], None] | None = None,
     on_error: Callable[[str], None] | None = None,
     on_connected: Callable[[], None] | None = None,
@@ -430,12 +435,12 @@ def create_asr_client(
     """根据模型名创建对应的 ASR 客户端。"""
     if model in _QWEN_ASR_MODELS:
         return QwenASRClient(
-            api_key=api_key, model=model,
+            api_key=api_key, model=model, language=language,
             on_result=on_result, on_error=on_error,
             on_connected=on_connected, on_disconnected=on_disconnected,
         )
     return FunASRClient(
-        api_key=api_key, model=model,
+        api_key=api_key, model=model, language=language,
         on_result=on_result, on_error=on_error,
         on_connected=on_connected, on_disconnected=on_disconnected,
     )
