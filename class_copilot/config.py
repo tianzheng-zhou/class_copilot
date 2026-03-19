@@ -1,0 +1,101 @@
+"""应用配置 - 使用 pydantic-settings"""
+
+import os
+from pathlib import Path
+from typing import Literal
+
+from pydantic_settings import BaseSettings
+from pydantic import Field
+
+
+class Settings(BaseSettings):
+    """全局配置"""
+
+    # 服务器
+    server_port: int = Field(default=8765, description="服务端口")
+
+    # 数据存储
+    data_dir: str = Field(
+        default=str(Path.home() / "class_copilot_data"),
+        description="数据存储根目录",
+    )
+
+    # DashScope API (阿里百炼)
+    dashscope_api_key: str = Field(default="", description="DashScope API Key")
+
+    # LLM 配置
+    llm_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        description="LLM API 基础URL",
+    )
+    llm_model_fast: str = Field(default="qwen-plus", description="快速LLM模型")
+    llm_model_quality: str = Field(default="qwen-max", description="高质量LLM模型")
+
+    # ASR 配置
+    asr_model: str = Field(
+        default="paraformer-realtime-v2", description="实时ASR模型"
+    )
+    refined_asr_model: str = Field(
+        default="qwen3-asr-flash", description="精修ASR模型"
+    )
+
+    # 音频配置
+    sample_rate: int = Field(default=16000, description="采样率")
+    channels: int = Field(default=1, description="声道数")
+
+    # 功能开关
+    language: Literal["zh", "en"] = Field(default="zh", description="授课语言")
+    enable_brief_answer: bool = Field(default=True, description="启用简洁版答案")
+    enable_detailed_answer: bool = Field(default=True, description="启用展开版答案")
+    enable_translation: bool = Field(default=False, description="启用英文翻译")
+    enable_bilingual: bool = Field(default=False, description="启用双语展示")
+
+    # 精修 ASR 配置
+    enable_refinement: bool = Field(default=False, description="启用高精度精修")
+    refinement_strategy: Literal["post", "periodic", "manual"] = Field(
+        default="post", description="精修触发策略"
+    )
+    refinement_interval_minutes: int = Field(
+        default=5, description="课中定时精修间隔(分钟)"
+    )
+    refinement_max_minutes: int = Field(
+        default=90, description="单次精修上限(分钟)"
+    )
+    enable_refinement_recheck: bool = Field(
+        default=True, description="精修后问题二次检测"
+    )
+    enable_refinement_answer_update: bool = Field(
+        default=True, description="精修后答案自动更新"
+    )
+
+    # 问题检测
+    question_confidence_threshold: float = Field(
+        default=0.7, description="问题检测置信度阈值"
+    )
+    question_cooldown_seconds: int = Field(
+        default=15, description="问题检测最小冷却间隔(秒)"
+    )
+    question_similarity_threshold: float = Field(
+        default=0.8, description="问题去重相似度阈值"
+    )
+
+    # LLM 输入过滤
+    llm_filter_mode: Literal["teacher_only", "all"] = Field(
+        default="teacher_only", description="LLM输入过滤模式"
+    )
+
+    # 加密密钥（用于加密存储 API Key）
+    encryption_key: str = Field(default="", description="加密密钥（自动生成）")
+
+    model_config = {
+        "env_file": ".env",
+        "env_prefix": "CC_",
+    }
+
+
+settings = Settings()
+
+# 确保数据目录存在
+Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
+(Path(settings.data_dir) / "recordings").mkdir(parents=True, exist_ok=True)
+(Path(settings.data_dir) / "logs").mkdir(parents=True, exist_ok=True)

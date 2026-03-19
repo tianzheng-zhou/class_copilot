@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学习笔记</title>
+    <link rel="stylesheet" href="/assets/style.css">
+    <!-- highlight.js for code blocks -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- marked for markdown -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+    <!-- DOMPurify for XSS protection -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- 顶部导航栏 -->
+        <header class="navbar">
+            <div class="navbar-left">
+                <span class="logo">📝 听课助手</span>
+                <div class="course-select">
+                    <input type="text" id="courseInput" placeholder="输入课程名..." list="courseList" autocomplete="off">
+                    <datalist id="courseList"></datalist>
+                </div>
+            </div>
+            <div class="navbar-center">
+                <button id="btnToggleListen" class="btn btn-primary btn-listen" title="Ctrl+Shift+S">
+                    <span class="btn-icon">🎤</span>
+                    <span class="btn-text">开始监听</span>
+                </button>
+            </div>
+            <div class="navbar-right">
+                <span id="statusIndicator" class="status-indicator status-ready">● 就绪</span>
+                <button id="btnSettings" class="btn btn-icon-only" title="设置">⚙️</button>
+            </div>
+        </header>
+
+        <!-- 状态栏 -->
+        <div class="status-bar">
+            <span id="statusText">就绪</span>
+            <span id="refinementStatus" class="refinement-status" style="display:none;"></span>
+            <span id="filterMode" class="filter-badge" title="Ctrl+Shift+F">仅教师</span>
+            <span id="recordingTime" class="recording-time" style="display:none;">00:00</span>
+        </div>
+
+        <!-- 主内容区 - 选项卡 -->
+        <div class="tabs">
+            <button class="tab active" data-tab="transcription">📝 转写</button>
+            <button class="tab" data-tab="answers">💡 回答</button>
+            <button class="tab" data-tab="chat">💬 提问</button>
+            <button class="tab" data-tab="history">📚 历史</button>
+        </div>
+
+        <div class="tab-content">
+            <!-- 转写面板 -->
+            <div id="tab-transcription" class="panel active">
+                <div id="transcriptionArea" class="transcription-area">
+                    <div class="empty-hint">点击"开始监听"开始课堂转写...</div>
+                </div>
+                <div class="transcription-actions">
+                    <button id="btnCopyTranscription" class="btn btn-small">📋 复制转写</button>
+                </div>
+            </div>
+
+            <!-- 回答面板 -->
+            <div id="tab-answers" class="panel">
+                <div id="answersArea" class="answers-area">
+                    <div class="empty-hint">等待检测到课堂问题...</div>
+                </div>
+            </div>
+
+            <!-- 提问面板 -->
+            <div id="tab-chat" class="panel">
+                <div id="chatArea" class="chat-area">
+                    <div class="empty-hint">基于课堂内容向 AI 提问</div>
+                </div>
+                <div class="chat-input-area">
+                    <div class="chat-options">
+                        <select id="chatModel">
+                            <option value="">快速模型</option>
+                            <option value="qwen-max">高质量模型</option>
+                        </select>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chatThinkMode"> 深度思考
+                        </label>
+                    </div>
+                    <div class="chat-input-row">
+                        <input type="text" id="chatInput" placeholder="输入你的问题... (Ctrl+Shift+A)" autocomplete="off">
+                        <button id="btnSendChat" class="btn btn-primary">发送</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 历史面板 -->
+            <div id="tab-history" class="panel">
+                <div id="historyList" class="history-list">
+                    <div class="empty-hint">加载中...</div>
+                </div>
+                <div id="historyDetail" class="history-detail" style="display:none;">
+                    <button id="btnBackToList" class="btn btn-small">← 返回列表</button>
+                    <div id="historyContent"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部操作栏 -->
+        <footer class="bottom-bar">
+            <button id="btnManualDetect" class="btn btn-small" title="Ctrl+Shift+Q">🔍 手动检测</button>
+            <button id="btnCopyAnswer" class="btn btn-small" title="Ctrl+Shift+C">📋 复制答案</button>
+            <button id="btnManualRefine" class="btn btn-small" title="Ctrl+Shift+R" style="display:none;">🔄 精修</button>
+        </footer>
+
+        <!-- 设置面板 -->
+        <div id="settingsModal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>设置</h2>
+                    <button id="btnCloseSettings" class="btn-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="settings-section">
+                        <h3>🔑 API 密钥</h3>
+                        <div class="form-group">
+                            <label>DashScope API Key</label>
+                            <input type="password" id="settingApiKey" placeholder="留空保持不变">
+                            <small>首次使用请配置阿里百炼 API Key</small>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>🎤 音频设置</h3>
+                        <div class="form-group">
+                            <label>麦克风</label>
+                            <select id="settingMicrophone"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>课程热词（逗号分隔）</label>
+                            <input type="text" id="settingHotWords" placeholder="马克思主义,辩证法,唯物论">
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>🌐 语言</h3>
+                        <div class="form-group">
+                            <label>授课语言</label>
+                            <select id="settingLanguage">
+                                <option value="zh">中文</option>
+                                <option value="en">英文</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="settingTranslation"> 英文翻译
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="settingBilingual"> 双语展示
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>💡 答案设置</h3>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="settingBrief" checked> 简洁版答案</label>
+                        </div>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="settingDetailed" checked> 展开版答案</label>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>🔄 高精度精修（可选）</h3>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="settingRefinement"> 启用高精度精修</label>
+                            <small>会产生额外 API 费用</small>
+                        </div>
+                        <div id="refinementSettings" style="display:none;">
+                            <div class="form-group">
+                                <label>精修策略</label>
+                                <select id="settingRefinementStrategy">
+                                    <option value="post">课后自动</option>
+                                    <option value="periodic">课中定时</option>
+                                    <option value="manual">仅手动</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>课中间隔（分钟）</label>
+                                <input type="number" id="settingRefinementInterval" value="5" min="1" max="30">
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="settingRefinementRecheck" checked> 精修后问题补检</label>
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="settingRefinementAnswerUpdate" checked> 精修后答案更新</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="btnSaveSettings" class="btn btn-primary" style="width:100%;margin-top:16px;">保存设置</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast 通知 -->
+        <div id="toastContainer" class="toast-container"></div>
+    </div>
+
+    <script src="/assets/app.js"></script>
+</body>
+</html>
