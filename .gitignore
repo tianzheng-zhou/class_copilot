@@ -24,6 +24,8 @@ data/
 *.db
 *.mp3
 *.wav
+*.rar
+*.rar.bak
 
 # Node
 node_modules/
