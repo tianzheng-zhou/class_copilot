@@ -1,18 +1,27 @@
-"""精修 ASR 服务 - 使用 qwen3-asr-flash 进行高精度文件转写"""
+"""精修 ASR 服务 - 使用 DashScope 文件转写 API (Transcription) 进行高精度离线转写
+
+已验证的 API 流程 (2025-01 测试通过):
+  1. Files.upload(file_path, purpose="file-extract") → uploaded_files[0]["file_id"]
+  2. Files.get(file_id) → output["url"]  (OSS HTTP URL)
+  3. Transcription.async_call(model="paraformer-v2", file_urls=[url]) → task_id
+  4. Transcription.fetch(task=task_id) 轮询 → results[0]["transcription_url"]
+  5. 下载 transcription_url JSON → transcripts[0]["sentences"][]{begin_time, end_time, text}
+     时间单位为毫秒。
+"""
 
 import asyncio
-from datetime import datetime
+import time
 from pathlib import Path
 
 import dashscope
+import httpx
 
-from loguru import logger
 from class_copilot.config import settings
 from class_copilot.logger import refinement_logger
 
 
 class RefinementService:
-    """高精度精修 ASR 服务"""
+    """高精度精修 ASR 服务 - 通过 DashScope 文件转写 API"""
 
     def __init__(self):
         self._running_tasks: dict[str, asyncio.Task] = {}
@@ -25,74 +34,187 @@ class RefinementService:
         language: str = "zh",
     ) -> list[dict] | None:
         """
-        对音频文件进行高精度转写。
-        返回转写结果列表: [{"text": str, "start_time": float, "end_time": float, "speaker_label": str}]
+        对本地音频文件进行高精度转写（非实时,离线模式）。
+        返回: [{"text": str, "start_time": float, "end_time": float}] 或 None
         """
-        if not Path(audio_file_path).exists():
+        file_path = Path(audio_file_path)
+        if not file_path.exists():
             refinement_logger.error("音频文件不存在: {}", audio_file_path)
             return None
 
         dashscope.api_key = settings.dashscope_api_key
 
-        # 构建热词
-        vocabulary = None
-        if hot_words:
-            words = [w.strip() for w in hot_words.split(",") if w.strip()]
-            if words:
-                vocabulary = [{"text": w, "weight": 4} for w in words]
-
         try:
             refinement_logger.info("开始精修转写: {}", audio_file_path)
 
-            # 使用 DashScope 文件转写 API
-            response = await asyncio.to_thread(
-                dashscope.audio.asr.Transcription.call,
-                model=settings.refined_asr_model,
-                file_urls=[audio_file_path],
-                language_hints=[language],
-                **({"vocabulary": vocabulary} if vocabulary else {}),
+            # ── 步骤1: 上传文件 → file_id ──
+            refinement_logger.debug("上传文件到 DashScope...")
+            upload_resp = await asyncio.to_thread(
+                dashscope.Files.upload,
+                file_path=audio_file_path,
+                purpose="file-extract",
+                api_key=settings.dashscope_api_key,
             )
-
-            if response.status_code != 200:
-                refinement_logger.error("精修转写API错误: {} - {}", response.status_code, response.message)
+            if upload_resp.status_code != 200:
+                refinement_logger.error("文件上传失败: status={}, resp={}", upload_resp.status_code, upload_resp)
                 return None
 
-            # 解析结果
-            results = []
-            transcription_result = response.output
-            if transcription_result and "results" in transcription_result:
-                for item in transcription_result["results"]:
-                    transcript = item.get("transcription_url") or item.get("text", "")
-                    # 如果返回的是 URL，需要额外请求获取内容
-                    if isinstance(transcript, str) and transcript.startswith("http"):
-                        import httpx
-                        async with httpx.AsyncClient() as client:
-                            resp = await client.get(transcript)
-                            transcript_data = resp.json()
-                    else:
-                        transcript_data = {"transcripts": [{"text": transcript}]}
+            output = upload_resp.output
+            if not isinstance(output, dict):
+                refinement_logger.error("文件上传返回格式异常: {}", output)
+                return None
 
-                    if "transcripts" in transcript_data:
-                        for seg in transcript_data["transcripts"]:
-                            results.append({
-                                "text": seg.get("text", ""),
-                                "start_time": seg.get("begin_time", 0) / 1000.0,
-                                "end_time": seg.get("end_time", 0) / 1000.0,
-                                "speaker_label": seg.get("speaker_id", "UNKNOWN"),
-                            })
+            file_id = ""
+            uploaded_files = output.get("uploaded_files", [])
+            if uploaded_files and isinstance(uploaded_files, list):
+                file_id = uploaded_files[0].get("file_id", "")
+            if not file_id:
+                refinement_logger.error("未获取到文件ID: {}", output)
+                return None
 
-            refinement_logger.info("精修转写完成: {} 个片段", len(results))
+            refinement_logger.debug("文件上传成功: file_id={}", file_id)
 
-            # 更新用量
-            file_size = Path(audio_file_path).stat().st_size
-            estimated_duration = file_size / (128 * 1024 / 8)  # 估算基于128kbps MP3
+            # ── 步骤2: 获取文件 OSS URL ──
+            get_resp = await asyncio.to_thread(
+                dashscope.Files.get,
+                file_id=file_id,
+                api_key=settings.dashscope_api_key,
+            )
+            if get_resp.status_code != 200:
+                refinement_logger.error("获取文件URL失败: status={}, resp={}", get_resp.status_code, get_resp)
+                return None
+
+            get_output = get_resp.output
+            if not isinstance(get_output, dict):
+                refinement_logger.error("获取文件URL返回格式异常: {}", get_output)
+                return None
+
+            file_url = get_output.get("url", "")
+            if not file_url:
+                refinement_logger.error("文件URL为空: {}", get_output)
+                return None
+
+            refinement_logger.debug("获取到文件URL (长度={})", len(file_url))
+
+            # ── 步骤3: 提交转写任务 ──
+            call_params = {
+                "model": settings.refined_asr_model,
+                "file_urls": [file_url],
+                "api_key": settings.dashscope_api_key,
+            }
+            if language:
+                call_params["language_hints"] = [language]
+            if hot_words:
+                words = [w.strip() for w in hot_words.split(",") if w.strip()]
+                if words:
+                    call_params["vocabulary"] = [{"text": w, "weight": 4} for w in words]
+
+            response = await asyncio.to_thread(
+                dashscope.audio.asr.Transcription.async_call,
+                **call_params,
+            )
+
+            if response.output is None or not isinstance(response.output, dict):
+                refinement_logger.error("提交转写任务返回异常: status={}, output={}", response.status_code, response.output)
+                return None
+
+            task_id = response.output.get("task_id")
+            if not task_id:
+                refinement_logger.error("未获取到转写任务ID: {}", response.output)
+                return None
+
+            refinement_logger.debug("转写任务已提交: task_id={}", task_id)
+
+            # ── 步骤4: 轮询等待完成 ──
+            result = await self._wait_for_task(task_id)
+            if result is None:
+                return None
+
+            # ── 步骤5: 解析结果 ──
+            results = await self._parse_transcription_result(result)
+
+            refinement_logger.info("精修转写完成: {} 个片段, 总文本长度={}",
+                                   len(results), sum(len(r["text"]) for r in results))
+
+            # 更新用量估算（基于 128kbps MP3）
+            file_size = file_path.stat().st_size
+            estimated_duration = file_size / (128 * 1024 / 8)
             self._monthly_usage_seconds += estimated_duration
 
             return results
 
         except Exception as e:
-            refinement_logger.error("精修转写异常: {}", e)
+            refinement_logger.error("精修转写异常: {}", e, exc_info=True)
             return None
+
+    async def _wait_for_task(self, task_id: str, timeout: int = 600, poll_interval: int = 3) -> dict | None:
+        """轮询等待转写任务完成"""
+        start = time.time()
+        while time.time() - start < timeout:
+            response = await asyncio.to_thread(
+                dashscope.audio.asr.Transcription.fetch,
+                task=task_id,
+                api_key=settings.dashscope_api_key,
+            )
+            if response.output is None or not isinstance(response.output, dict):
+                refinement_logger.warning("fetch 返回异常: {}", response.output)
+                await asyncio.sleep(poll_interval)
+                continue
+
+            status = response.output.get("task_status")
+            if status == "SUCCEEDED":
+                return response.output
+            elif status in ("FAILED", "CANCELED"):
+                refinement_logger.error("转写任务失败: status={}, output={}", status, response.output)
+                return None
+            # PENDING / RUNNING
+            await asyncio.sleep(poll_interval)
+
+        refinement_logger.error("转写任务超时: task_id={}", task_id)
+        return None
+
+    async def _parse_transcription_result(self, output: dict) -> list[dict]:
+        """解析转写结果，获取文本和时间戳"""
+        results = []
+        task_results = output.get("results", [])
+
+        for item in task_results:
+            transcription_url = item.get("transcription_url")
+            if not transcription_url:
+                continue
+
+            # 下载转写结果 JSON
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(transcription_url)
+                    resp.raise_for_status()
+                    data = resp.json()
+            except Exception as e:
+                refinement_logger.error("下载转写结果失败: {}", e)
+                continue
+
+            # 解析 transcripts
+            transcripts = data.get("transcripts", [])
+            for transcript in transcripts:
+                sentences = transcript.get("sentences", [])
+                if sentences:
+                    for sent in sentences:
+                        results.append({
+                            "text": sent.get("text", ""),
+                            "start_time": sent.get("begin_time", 0) / 1000.0,
+                            "end_time": sent.get("end_time", 0) / 1000.0,
+                        })
+                else:
+                    # 没有句级结果时使用整体文本
+                    text = transcript.get("text", "")
+                    if text:
+                        results.append({
+                            "text": text,
+                            "start_time": 0,
+                            "end_time": 0,
+                        })
+
+        return results
 
     async def start_post_session_refinement(
         self,

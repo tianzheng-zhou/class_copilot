@@ -181,9 +181,43 @@ class SessionManager:
     # ──────────── 音频→ASR 流 ────────────
 
     async def _feed_audio_to_asr(self):
-        """将录音数据发送到ASR"""
+        """将录音数据发送到ASR，ASR断开时自动重连"""
+        reconnect_attempts = 0
+        max_reconnect_rounds = 3
         try:
             while self.is_listening:
+                # 检测 ASR 是否断开
+                if self.asr_service.is_disconnected:
+                    # 不可恢复的错误（如 401 认证失败），直接停止
+                    if self.asr_service.is_permanent_error:
+                        asr_logger.error("ASR 认证失败 (API Key 无效)，停止监听")
+                        await self._broadcast("notification", {
+                            "type": "error",
+                            "message": "ASR 认证失败，请检查 API Key 配置",
+                        })
+                        await self.stop_listening()
+                        return
+
+                    reconnect_attempts += 1
+                    if reconnect_attempts > max_reconnect_rounds:
+                        asr_logger.error("ASR 多次重连均失败，停止监听")
+                        await self._broadcast("notification", {
+                            "type": "error",
+                            "message": "ASR 连接反复断开，已停止监听",
+                        })
+                        await self.stop_listening()
+                        return
+
+                    asr_logger.warning("检测到ASR断开，尝试重连 ({}/{})...",
+                                       reconnect_attempts, max_reconnect_rounds)
+                    success = await self._reconnect_asr()
+                    if not success:
+                        return
+                    continue
+
+                # 连接正常时重置计数
+                reconnect_attempts = 0
+
                 try:
                     audio_data = await asyncio.wait_for(
                         self.audio_service.audio_queue.get(), timeout=1.0
@@ -195,6 +229,42 @@ class SessionManager:
             pass
         except Exception as e:
             asr_logger.error("音频→ASR流异常: {}", e)
+
+    async def _reconnect_asr(self, max_retries: int = 3) -> bool:
+        """重连 ASR 服务，返回是否成功"""
+        await self.asr_service.stop()
+
+        # 清空积压的音频数据
+        while not self.audio_service.audio_queue.empty():
+            try:
+                self.audio_service.audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+        course_id = await self._get_or_create_course(self.current_course_name)
+        hot_words = await self._get_hot_words(course_id)
+
+        for attempt in range(max_retries):
+            try:
+                await self.asr_service.start(hot_words=hot_words, language=settings.language)
+                # 等待确认连接稳定（401等错误会在连接后立即异步到达）
+                await asyncio.sleep(1.0)
+                if self.asr_service.is_disconnected:
+                    asr_logger.warning("ASR 重连后立即断开 ({}/{})", attempt + 1, max_retries)
+                    await self.asr_service.stop()
+                    continue
+
+                asr_logger.info("ASR 重连成功 (第{}次尝试)", attempt + 1)
+                await self._broadcast("notification", {"type": "info", "message": "ASR已自动重连"})
+                return True
+            except Exception as e:
+                asr_logger.error("ASR 重连失败 ({}/{}): {}", attempt + 1, max_retries, e)
+                await asyncio.sleep(2 ** attempt)
+
+        asr_logger.error("ASR 重连全部失败，停止监听")
+        await self._broadcast("notification", {"type": "error", "message": "ASR连接断开且重连失败，已停止监听"})
+        await self.stop_listening()
+        return False
 
     async def _process_asr_results(self):
         """处理ASR结果，保存并广播"""
@@ -218,8 +288,10 @@ class SessionManager:
         is_final = result.get("is_final", False)
         speaker_label = result.get("speaker_label", "UNKNOWN")
 
-        # 判断是否是教师
-        is_teacher = await self._check_is_teacher(speaker_label)
+        # 判断是否是教师（仅在有有效说话人标签时查询）
+        is_teacher = False
+        if speaker_label != "UNKNOWN":
+            is_teacher = await self._check_is_teacher(speaker_label)
 
         if is_final:
             self._transcription_seq += 1
@@ -443,12 +515,13 @@ class SessionManager:
         if not self.current_session_id:
             return
 
-        refinement_logger.info("开始课后精修: {}", self.current_session_id)
-        await self._broadcast("refinement_status", {"status": "in_progress", "progress": 0})
+        session_id = self.current_session_id
+        refinement_logger.info("开始课后精修: {}", session_id)
+        await self._broadcast("refinement_status", {"status": "in_progress", "progress": 0, "session_id": session_id})
 
         async with async_session() as db:
             result = await db.execute(
-                select(Recording).where(Recording.session_id == self.current_session_id)
+                select(Recording).where(Recording.session_id == session_id)
             )
             recordings = result.scalars().all()
 
@@ -460,7 +533,7 @@ class SessionManager:
         hot_words = ""
         async with async_session() as db:
             result = await db.execute(
-                select(Session).where(Session.id == self.current_session_id)
+                select(Session).where(Session.id == session_id)
             )
             session = result.scalar_one_or_none()
             if session:
@@ -472,20 +545,83 @@ class SessionManager:
                     hot_words = course.hot_words or ""
 
         async def progress_callback(sid, progress, result, path):
+            # 保存精修结果到数据库
+            if result:
+                await self._save_refined_results(sid, result)
             await self._broadcast("refinement_status", {
                 "status": "in_progress",
                 "progress": progress,
+                "session_id": sid,
             })
 
         await self.refinement_service.start_post_session_refinement(
-            session_id=self.current_session_id,
+            session_id=session_id,
             recording_paths=paths,
             hot_words=hot_words,
             language=settings.language,
             progress_callback=progress_callback,
         )
 
-        await self._broadcast("refinement_status", {"status": "completed", "progress": 1.0})
+        # 更新会话精修状态
+        async with async_session() as db:
+            result = await db.execute(select(Session).where(Session.id == session_id))
+            session = result.scalar_one_or_none()
+            if session:
+                session.refinement_status = "completed"
+                session.refinement_progress = 1.0
+                await db.commit()
+
+        await self._broadcast("refinement_status", {"status": "completed", "progress": 1.0, "session_id": session_id})
+
+    async def _save_refined_results(self, session_id: str, refined_segments: list[dict]):
+        """将精修结果保存到对应的 Transcription 记录"""
+        if not refined_segments:
+            return
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(Transcription)
+                .where(Transcription.session_id == session_id, Transcription.is_final == True)
+                .order_by(Transcription.start_time)
+            )
+            originals = result.scalars().all()
+
+            if not originals:
+                # 无原始记录 → 直接创建精修记录
+                for i, seg in enumerate(refined_segments):
+                    trans = Transcription(
+                        session_id=session_id,
+                        start_time=seg["start_time"],
+                        end_time=seg["end_time"],
+                        sequence=i + 1,
+                        realtime_text="",
+                        refined_text=seg["text"],
+                        is_final=True,
+                        refinement_status="refined",
+                        refined_at=datetime.utcnow(),
+                    )
+                    db.add(trans)
+                await db.commit()
+                return
+
+            # 按时间重叠将精修片段映射到原始记录
+            for orig in originals:
+                matching_texts = []
+                for seg in refined_segments:
+                    # 计算时间重叠
+                    overlap_start = max(seg["start_time"], orig.start_time)
+                    overlap_end = min(seg["end_time"], orig.end_time)
+                    if overlap_end > overlap_start:
+                        matching_texts.append(seg["text"])
+
+                if matching_texts:
+                    orig.refined_text = "".join(matching_texts)
+                    orig.refinement_status = "refined"
+                    orig.refined_at = datetime.utcnow()
+
+            await db.commit()
+
+        refinement_logger.debug("已保存精修结果: session={}, 精修片段数={}", session_id, len(refined_segments))
 
     async def manual_refine(self):
         """手动触发精修"""
@@ -506,13 +642,14 @@ class SessionManager:
 
     async def _get_or_create_course(self, name: str) -> str:
         """获取或创建课程"""
+        effective_name = name or "未命名课程"
         async with async_session() as db:
-            result = await db.execute(select(Course).where(Course.name == name))
+            result = await db.execute(select(Course).where(Course.name == effective_name))
             course = result.scalar_one_or_none()
             if course:
                 return course.id
 
-            course = Course(name=name or "未命名课程", language=settings.language)
+            course = Course(name=effective_name, language=settings.language)
             db.add(course)
             await db.commit()
             return course.id

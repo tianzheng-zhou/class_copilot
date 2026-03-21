@@ -7,7 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from loguru import logger
 
-from class_copilot.database import init_db
+from class_copilot.config import settings
+from class_copilot.database import init_db, async_session
 from class_copilot.routes.ws_routes import router as ws_router, broadcast_worker
 from class_copilot.routes.api_routes import router as api_router
 from class_copilot.services.session_manager import session_manager
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
     async def startup():
         logger.info("应用启动中...")
         await init_db()
+        await _load_saved_settings()
         await session_manager.initialize()
 
         # 启动 WebSocket 广播工作者
@@ -63,3 +65,23 @@ def create_app() -> FastAPI:
             return FileResponse(os.path.join(frontend_dir, "index.html"))
 
     return app
+
+
+async def _load_saved_settings():
+    """从数据库加载已保存的设置（如 API Key）"""
+    from sqlalchemy import select
+    from class_copilot.models.models import SettingItem
+    from class_copilot.services.encryption_service import decrypt_value
+
+    try:
+        async with async_session() as db:
+            result = await db.execute(select(SettingItem))
+            items = result.scalars().all()
+            for item in items:
+                if hasattr(settings, item.key):
+                    value = decrypt_value(item.value) if item.is_encrypted else item.value
+                    setattr(settings, item.key, value)
+                    label = "***" if item.is_encrypted else value
+                    logger.info("已加载设置: {} = {}", item.key, label)
+    except Exception as e:
+        logger.warning("加载设置失败: {}", e)

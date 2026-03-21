@@ -15,15 +15,21 @@ from class_copilot.logger import asr_logger
 class RealtimeASRCallback(RecognitionCallback):
     """实时 ASR 回调处理器"""
 
-    def __init__(self, loop: asyncio.AbstractEventLoop, result_queue: asyncio.Queue):
+    def __init__(self, loop: asyncio.AbstractEventLoop, result_queue: asyncio.Queue, on_disconnect=None):
         self._loop = loop
         self._result_queue = result_queue
+        self._on_disconnect = on_disconnect
+
+    def _notify_disconnect(self, error_code=None):
+        if self._on_disconnect:
+            self._on_disconnect(error_code=error_code)
 
     def on_open(self):
         asr_logger.info("ASR 连接已建立")
 
     def on_close(self):
         asr_logger.info("ASR 连接已关闭")
+        self._notify_disconnect(error_code=None)
 
     def on_event(self, result: RecognitionResult):
         """收到识别结果"""
@@ -33,25 +39,33 @@ class RealtimeASRCallback(RecognitionCallback):
                 return
 
             text = sentence.get("text", "")
-            is_final = sentence.get("end_time", -1) >= 0  # 有 end_time 说明是最终结果
+            end_time = sentence.get("end_time")
+            is_final = end_time is not None and end_time >= 0
 
-            # 说话人信息
-            stash = result.get_stash()
-            speaker_id = None
-            if stash:
-                speaker_id = stash.get("speaker_id")
+            begin_time = sentence.get("begin_time") or 0
+            end_time_val = end_time if (is_final and end_time) else 0
 
             msg = {
                 "text": text,
                 "is_final": is_final,
-                "start_time": sentence.get("begin_time", 0) / 1000.0,
-                "end_time": sentence.get("end_time", 0) / 1000.0 if is_final else 0,
-                "speaker_label": f"SPEAKER_{speaker_id}" if speaker_id is not None else "UNKNOWN",
+                "start_time": begin_time / 1000.0,
+                "end_time": end_time_val / 1000.0,
+                "speaker_label": "UNKNOWN",
                 "sentence_id": sentence.get("sentence_id", 0),
             }
 
+            # 部分模型支持说话人分离，尝试获取
+            try:
+                stash = result.get_stash()
+                if stash:
+                    speaker_id = stash.get("speaker_id")
+                    if speaker_id is not None:
+                        msg["speaker_label"] = f"SPEAKER_{speaker_id}"
+            except Exception:
+                pass
+
             if text.strip():
-                asr_logger.debug("ASR结果 [final={}] [spk={}]: {}", is_final, msg["speaker_label"], text)
+                asr_logger.debug("ASR结果 [final={}]: {}", is_final, text)
                 self._loop.call_soon_threadsafe(self._result_queue.put_nowait, msg)
 
         except Exception as e:
@@ -59,9 +73,19 @@ class RealtimeASRCallback(RecognitionCallback):
 
     def on_error(self, result: RecognitionResult):
         asr_logger.error("ASR 错误: {}", result)
+        # 提取错误码传给 disconnect 回调
+        error_code = None
+        try:
+            import json
+            err = json.loads(str(result))
+            error_code = err.get("status_code") or err.get("code")
+        except Exception:
+            pass
+        self._notify_disconnect(error_code=error_code)
 
     def on_complete(self):
         asr_logger.info("ASR 识别完成")
+        self._notify_disconnect(error_code=None)
 
 
 class RealtimeASRService:
@@ -72,6 +96,8 @@ class RealtimeASRService:
         self._callback = None
         self.result_queue: asyncio.Queue = asyncio.Queue()
         self._running = False
+        self._disconnected = False  # ASR 服务端断开标志
+        self._last_error_code: int | None = None  # 最近一次错误码
 
     async def start(self, hot_words: str = "", language: str = "zh"):
         """启动实时 ASR"""
@@ -80,7 +106,7 @@ class RealtimeASRService:
             return
 
         loop = asyncio.get_event_loop()
-        self._callback = RealtimeASRCallback(loop, self.result_queue)
+        self._callback = RealtimeASRCallback(loop, self.result_queue, on_disconnect=self._on_asr_disconnect)
 
         # 构建热词参数
         vocabulary = None
@@ -109,15 +135,18 @@ class RealtimeASRService:
 
         self._recognition.start()
         self._running = True
+        self._disconnected = False
         asr_logger.info("实时 ASR 已启动, 模型={}, 语言={}", settings.asr_model, language)
 
     async def send_audio(self, audio_bytes: bytes):
         """发送音频数据到 ASR"""
-        if self._recognition and self._running:
+        if self._recognition and self._running and not self._disconnected:
             try:
                 self._recognition.send_audio_frame(audio_bytes)
             except Exception as e:
-                asr_logger.error("发送音频到ASR失败: {}", e)
+                if not self._disconnected:
+                    self._disconnected = True
+                    asr_logger.error("ASR 连接已断开，停止发送音频: {}", e)
 
     async def stop(self):
         """停止 ASR"""
@@ -125,12 +154,31 @@ class RealtimeASRService:
             try:
                 self._recognition.stop()
             except Exception as e:
-                asr_logger.error("停止ASR异常: {}", e)
+                if not self._disconnected:
+                    asr_logger.error("停止ASR异常: {}", e)
             finally:
                 self._running = False
+                self._disconnected = False
                 self._recognition = None
                 asr_logger.info("实时 ASR 已停止")
+
+    def _on_asr_disconnect(self, error_code=None):
+        """ASR 服务端断开回调"""
+        if not self._disconnected:
+            self._disconnected = True
+            if error_code is not None:
+                self._last_error_code = error_code
+            asr_logger.warning("ASR 服务端连接断开 (error_code={})", error_code)
 
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def is_disconnected(self) -> bool:
+        return self._disconnected
+
+    @property
+    def is_permanent_error(self) -> bool:
+        """是否为不可恢复的错误（如认证失败）"""
+        return self._last_error_code in (401, 403)

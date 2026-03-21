@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # 数据存储
     data_dir: str = Field(
-        default=str(Path.home() / "class_copilot_data"),
+        default=str(Path(__file__).resolve().parent.parent / "data"),
         description="数据存储根目录",
     )
 
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         default="paraformer-realtime-v2", description="实时ASR模型"
     )
     refined_asr_model: str = Field(
-        default="qwen3-asr-flash", description="精修ASR模型"
+        default="paraformer-v2", description="精修ASR模型(文件转写)"
     )
 
     # 音频配置
@@ -81,7 +81,7 @@ class Settings(BaseSettings):
 
     # LLM 输入过滤
     llm_filter_mode: Literal["teacher_only", "all"] = Field(
-        default="teacher_only", description="LLM输入过滤模式"
+        default="all", description="LLM输入过滤模式"
     )
 
     # 加密密钥（用于加密存储 API Key）

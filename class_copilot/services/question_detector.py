@@ -31,12 +31,14 @@ class QuestionDetector:
             if len(self._buffer) > 30:
                 self._buffer = self._buffer[-30:]
 
-    def _build_detection_text(self, filter_mode: str = "teacher_only") -> str:
+    def _build_detection_text(self, filter_mode: str = "all") -> str:
         """构建检测用文本"""
         recent = self._buffer[-10:]  # 最近10条
 
         if filter_mode == "teacher_only":
-            segments = [s for s in recent if s.get("is_teacher", False)]
+            # 仅在有说话人信息时过滤，否则使用全部
+            teacher_segments = [s for s in recent if s.get("is_teacher", False)]
+            segments = teacher_segments if teacher_segments else recent
         else:
             segments = recent
 

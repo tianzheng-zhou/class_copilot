@@ -8,7 +8,7 @@ const state = {
     isListening: false,
     sessionId: null,
     courseName: '',
-    filterMode: 'teacher_only',
+    filterMode: 'all',
     questions: [],  // {id, question, source, answers: {brief: '', detailed: ''}, showDetailed: false}
     currentAnswerType: 'brief',
     recordingStartTime: null,
@@ -135,6 +135,13 @@ function handleServerMessage(msg) {
         case 'refinement_status':
             handleRefinementStatus(data);
             break;
+        case 'notification':
+            if (data.type === 'error') {
+                showToast(data.message, 'error');
+            } else {
+                showToast(data.message);
+            }
+            break;
         case 'info':
             showToast(data.message);
             break;
@@ -219,13 +226,13 @@ function handleTranscription(data) {
     const hint = area.querySelector('.empty-hint');
     if (hint) hint.remove();
 
-    const { text, is_final, speaker_label, is_teacher, sentence_id } = data;
+    const { text, is_final, speaker_label, is_teacher, sentence_id, start_time, end_time } = data;
 
     if (!is_final) {
         // 中间结果：更新或创建临时元素
         let el = state.interimSegments[sentence_id];
         if (!el) {
-            el = createTransSegment(speaker_label, is_teacher, text, true);
+            el = createTransSegment(speaker_label, is_teacher, text, true, start_time, end_time);
             area.appendChild(el);
             state.interimSegments[sentence_id] = el;
         } else {
@@ -237,9 +244,12 @@ function handleTranscription(data) {
         if (el) {
             el.querySelector('.trans-text').textContent = text;
             el.querySelector('.trans-text').classList.remove('interim');
+            // 更新时间戳
+            const tsEl = el.querySelector('.speaker-timestamp');
+            if (tsEl) tsEl.textContent = formatTimestamp(start_time, end_time);
             delete state.interimSegments[sentence_id];
         } else {
-            el = createTransSegment(speaker_label, is_teacher, text, false);
+            el = createTransSegment(speaker_label, is_teacher, text, false, start_time, end_time);
             area.appendChild(el);
         }
     }
@@ -248,19 +258,41 @@ function handleTranscription(data) {
     area.scrollTop = area.scrollHeight;
 }
 
-function createTransSegment(speakerLabel, isTeacher, text, isInterim) {
+function createTransSegment(speakerLabel, isTeacher, text, isInterim, startTime, endTime) {
     const el = document.createElement('div');
     el.className = 'trans-segment';
 
-    const labelClass = isTeacher ? 'speaker-teacher' : 'speaker-other';
-    const displayLabel = isTeacher ? '👨‍🏫 教师' : `🗣️ ${speakerLabel}`;
+    // 无说话人信息时不显示标签
+    const hasSpeaker = speakerLabel && speakerLabel !== 'UNKNOWN';
+    const timeStr = formatTimestamp(startTime, endTime);
+
+    let labelHtml = '';
+    if (isTeacher) {
+        labelHtml = `<div class="speaker-label speaker-teacher">${escapeHtml('👨‍🏫 教师')}<span class="speaker-timestamp">${timeStr}</span></div>`;
+    } else if (hasSpeaker) {
+        labelHtml = `<div class="speaker-label speaker-other">${escapeHtml('🗣️ ' + speakerLabel)}<span class="speaker-timestamp">${timeStr}</span></div>`;
+    } else if (timeStr) {
+        labelHtml = `<div class="speaker-label"><span class="speaker-timestamp">${timeStr}</span></div>`;
+    }
 
     el.innerHTML = `
-        <div class="speaker-label ${labelClass}">${escapeHtml(displayLabel)}</div>
+        ${labelHtml}
         <div class="trans-text ${isInterim ? 'interim' : ''}">${escapeHtml(text)}</div>
     `;
 
     return el;
+}
+
+function formatTimestamp(startTime, endTime) {
+    if (startTime == null && endTime == null) return '';
+    const fmt = (t) => {
+        if (t == null || t <= 0) return '--:--';
+        const totalSec = Math.floor(t);
+        const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
+        const sec = String(totalSec % 60).padStart(2, '0');
+        return `${min}:${sec}`;
+    };
+    return `${fmt(startTime)} - ${fmt(endTime)}`;
 }
 
 // ──────────── 问题/答案处理 ────────────
@@ -451,13 +483,85 @@ function handleRefinementStatus(data) {
     if (data.status === 'in_progress') {
         el.style.display = 'inline';
         el.textContent = `精修中 (${Math.round(data.progress * 100)}%)`;
+        // 精修进行中时更新精修面板
+        const refinedArea = document.getElementById('refinedTranscriptionArea');
+        if (refinedArea && refinedArea.querySelector('.empty-hint')) {
+            refinedArea.innerHTML = `<div class="refined-loading">⏳ 精修中 (${Math.round(data.progress * 100)}%)...</div>`;
+        }
     } else if (data.status === 'completed') {
         el.style.display = 'inline';
         el.textContent = '精修完成 ✓';
         setTimeout(() => { el.style.display = 'none'; }, 5000);
+        // 精修完成 → 加载精修结果
+        if (data.session_id || state.sessionId) {
+            loadRefinedTranscriptions(data.session_id || state.sessionId);
+        }
     } else {
         el.style.display = 'none';
     }
+}
+
+async function loadRefinedTranscriptions(sessionId) {
+    if (!sessionId) return;
+    const area = document.getElementById('refinedTranscriptionArea');
+    if (!area) return;
+
+    area.innerHTML = '<div class="refined-loading">加载精修结果...</div>';
+
+    try {
+        const resp = await fetch(`/api/sessions/${sessionId}`);
+        const detail = await resp.json();
+
+        const transcriptions = detail.transcriptions || [];
+        const hasRefined = transcriptions.some(t => t.refined_text);
+
+        if (!hasRefined) {
+            area.innerHTML = '<div class="empty-hint">暂无精修结果</div>';
+            return;
+        }
+
+        area.innerHTML = '';
+        transcriptions.forEach(t => {
+            if (t.refined_text) {
+                const el = createTransSegment(
+                    t.speaker_label, t.is_teacher, t.refined_text, false,
+                    t.start_time, t.end_time
+                );
+                area.appendChild(el);
+            }
+        });
+    } catch (e) {
+        console.error('加载精修结果失败:', e);
+        area.innerHTML = '<div class="empty-hint">加载精修结果失败</div>';
+    }
+}
+
+// ──────────── 转写子标签页 ────────────
+function switchSubTab(subtabName) {
+    const panel = document.getElementById('tab-transcription');
+    panel.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+    panel.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active'));
+
+    panel.querySelector(`.sub-tab[data-subtab="${subtabName}"]`).classList.add('active');
+    document.getElementById(subtabName === 'realtime' ? 'subtab-realtime' : 'subtab-refined').classList.add('active');
+
+    // 如果切到精修标签且有 session，尝试加载
+    if (subtabName === 'refined' && state.sessionId) {
+        const refinedArea = document.getElementById('refinedTranscriptionArea');
+        if (refinedArea && refinedArea.querySelector('.empty-hint')) {
+            loadRefinedTranscriptions(state.sessionId);
+        }
+    }
+}
+
+function switchHistoryTransTab(btn, panelName) {
+    // 切换按钮高亮
+    btn.closest('.history-sub-tabs').querySelectorAll('.history-trans-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    // 切换面板
+    const container = btn.closest('.history-sub-tabs').parentElement;
+    container.querySelectorAll('.history-trans-panel').forEach(p => p.style.display = 'none');
+    container.querySelector(`.history-trans-panel[data-panel="${panelName}"]`).style.display = 'block';
 }
 
 // ──────────── 历史记录 ────────────
@@ -520,12 +624,41 @@ async function viewSession(sessionId) {
 
         let html = `<h3>${escapeHtml(detail.session.course_name)} - ${escapeHtml(detail.session.date)}</h3>`;
 
-        // 转写
+        // 转写 - 含原始/精修子标签
+        const hasRefined = detail.transcriptions.some(t => t.refined_text);
         html += '<h4 style="margin-top:16px;">📝 转写记录</h4>';
+
+        if (hasRefined) {
+            html += `
+                <div class="history-sub-tabs" style="display:flex;gap:4px;margin-bottom:8px;">
+                    <button class="btn btn-small history-trans-tab active" onclick="switchHistoryTransTab(this,'original')">📡 原始转写</button>
+                    <button class="btn btn-small history-trans-tab" onclick="switchHistoryTransTab(this,'refined')">✨ 精修转写</button>
+                </div>
+            `;
+        }
+
+        // 原始转写
+        html += '<div class="history-trans-panel" data-panel="original">';
         detail.transcriptions.forEach(t => {
-            const role = t.is_teacher ? '👨‍🏫 教师' : `🗣️ ${t.speaker_label}`;
-            html += `<p><strong style="color:${t.is_teacher ? 'var(--teacher-color)' : 'var(--student-color)'}">${escapeHtml(role)}</strong>: ${escapeHtml(t.text)}</p>`;
+            const role = t.is_teacher ? '👨‍🏫 教师' : (t.speaker_label && t.speaker_label !== 'UNKNOWN' ? `🗣️ ${t.speaker_label}` : '');
+            const ts = formatTimestamp(t.start_time, t.end_time);
+            const labelColor = t.is_teacher ? 'var(--teacher-color)' : 'var(--student-color)';
+            html += `<p><strong style="color:${labelColor}">${escapeHtml(role)}</strong>${role ? ' ' : ''}<span style="color:var(--text-muted);font-size:11px;">${ts}</span><br>${escapeHtml(t.realtime_text || t.text)}</p>`;
         });
+        html += '</div>';
+
+        // 精修转写
+        if (hasRefined) {
+            html += '<div class="history-trans-panel" data-panel="refined" style="display:none;">';
+            detail.transcriptions.forEach(t => {
+                if (!t.refined_text) return;
+                const role = t.is_teacher ? '👨‍🏫 教师' : (t.speaker_label && t.speaker_label !== 'UNKNOWN' ? `🗣️ ${t.speaker_label}` : '');
+                const ts = formatTimestamp(t.start_time, t.end_time);
+                const labelColor = t.is_teacher ? 'var(--teacher-color)' : 'var(--student-color)';
+                html += `<p><strong style="color:${labelColor}">${escapeHtml(role)}</strong>${role ? ' ' : ''}<span style="color:var(--text-muted);font-size:11px;">${ts}</span><br>${escapeHtml(t.refined_text)}</p>`;
+            });
+            html += '</div>';
+        }
 
         // 问题和答案
         if (detail.questions.length) {
@@ -718,6 +851,11 @@ document.addEventListener('DOMContentLoaded', () => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
     });
 
+    // 转写子标签页
+    document.querySelectorAll('.sub-tab').forEach(tab => {
+        tab.addEventListener('click', () => switchSubTab(tab.dataset.subtab));
+    });
+
     // 监听按钮
     document.getElementById('btnToggleListen').addEventListener('click', () => {
         if (state.isListening) {
@@ -752,12 +890,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 复制转写
     document.getElementById('btnCopyTranscription').addEventListener('click', () => {
-        const area = document.getElementById('transcriptionArea');
+        // 从当前激活的子标签页复制
+        const activeSubPanel = document.querySelector('#tab-transcription .sub-panel.active');
+        const area = activeSubPanel ? activeSubPanel.querySelector('.transcription-area') : document.getElementById('transcriptionArea');
         const segments = area.querySelectorAll('.trans-segment');
         const text = Array.from(segments).map(s => {
             const label = s.querySelector('.speaker-label')?.textContent || '';
             const content = s.querySelector('.trans-text')?.textContent || '';
-            return `${label}: ${content}`;
+            return label ? `${label} ${content}` : content;
         }).join('\n');
         navigator.clipboard.writeText(text).then(() => {
             showToast('已复制转写文本', 'success');

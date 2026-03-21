@@ -55,8 +55,19 @@
         <div class="tab-content">
             <!-- 转写面板 -->
             <div id="tab-transcription" class="panel active">
-                <div id="transcriptionArea" class="transcription-area">
-                    <div class="empty-hint">点击"开始监听"开始课堂转写...</div>
+                <div class="sub-tabs">
+                    <button class="sub-tab active" data-subtab="realtime">📡 原始转写</button>
+                    <button class="sub-tab" data-subtab="refined">✨ 精修转写</button>
+                </div>
+                <div id="subtab-realtime" class="sub-panel active">
+                    <div id="transcriptionArea" class="transcription-area">
+                        <div class="empty-hint">点击"开始监听"开始课堂转写...</div>
+                    </div>
+                </div>
+                <div id="subtab-refined" class="sub-panel">
+                    <div id="refinedTranscriptionArea" class="transcription-area">
+                        <div class="empty-hint">精修完成后将在此显示高精度转写结果</div>
+                    </div>
                 </div>
                 <div class="transcription-actions">
                     <button id="btnCopyTranscription" class="btn btn-small">📋 复制转写</button>

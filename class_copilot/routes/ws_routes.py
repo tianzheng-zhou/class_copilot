@@ -7,6 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from class_copilot.logger import ws_logger
+from class_copilot.config import settings
 from class_copilot.services.session_manager import session_manager
 
 router = APIRouter()
@@ -51,7 +52,7 @@ async def websocket_endpoint(websocket: WebSocket):
             "session_id": session_manager.current_session_id,
             "course_name": session_manager.current_course_name,
             "is_listening": session_manager.is_listening,
-            "filter_mode": "teacher_only",
+            "filter_mode": settings.llm_filter_mode,
         },
     })
 

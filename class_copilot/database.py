@@ -16,7 +16,10 @@ db_path = Path(settings.data_dir) / "class_copilot.db"
 engine = create_async_engine(
     f"sqlite+aiosqlite:///{db_path}",
     echo=False,
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False, "timeout": 30},
+    pool_size=1,
+    max_overflow=0,
+    pool_timeout=30,
 )
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

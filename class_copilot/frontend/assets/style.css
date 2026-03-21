@@ -248,6 +248,45 @@ body {
 }
 
 /* ──────────── Transcription ──────────── */
+.sub-tabs {
+    display: flex;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    padding: 0 8px;
+}
+
+.sub-tab {
+    padding: 6px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.sub-tab:hover {
+    color: var(--text-secondary);
+}
+
+.sub-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.sub-panel {
+    display: none;
+    flex: 1;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.sub-panel.active {
+    display: flex;
+}
+
 .transcription-area {
     flex: 1;
     overflow-y: auto;
@@ -266,6 +305,15 @@ body {
     font-size: 11px;
     font-weight: 600;
     margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.trans-segment .speaker-timestamp {
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--text-muted);
 }
 
 .trans-segment .speaker-teacher {
@@ -292,6 +340,17 @@ body {
     font-size: 10px;
     color: var(--success);
     margin-left: 4px;
+}
+
+.trans-segment.unrefined {
+    opacity: 0.5;
+}
+
+.refined-loading {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--text-muted);
+    font-size: 14px;
 }
 
 .transcription-actions {
