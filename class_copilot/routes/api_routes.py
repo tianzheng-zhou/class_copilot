@@ -19,6 +19,7 @@ from class_copilot.models.models import (
 )
 from class_copilot.services.encryption_service import encrypt_value, decrypt_value
 from class_copilot.services.session_manager import session_manager
+from class_copilot.services.oss_service import oss_service
 
 router = APIRouter(prefix="/api")
 
@@ -308,6 +309,10 @@ async def update_settings(data: SettingUpdate):
         settings.doubao_appid = data.value
     elif data.key == "doubao_access_token":
         settings.doubao_access_token = data.value
+    elif data.key == "oss_access_key_id":
+        settings.oss_access_key_id = data.value
+    elif data.key == "oss_access_key_secret":
+        settings.oss_access_key_secret = data.value
 
     return {"status": "updated"}
 
@@ -332,6 +337,10 @@ async def get_runtime_settings():
         "auto_answer_model": settings.auto_answer_model,
         "llm_model_fast": settings.llm_model_fast,
         "llm_model_quality": settings.llm_model_quality,
+        "oss_bucket_name": settings.oss_bucket_name,
+        "oss_endpoint": settings.oss_endpoint,
+        "oss_upload_prefix": settings.oss_upload_prefix,
+        "oss_url_expiry_seconds": settings.oss_url_expiry_seconds,
     }
 
 
@@ -433,3 +442,17 @@ async def get_refinement_usage():
     return {
         "monthly_minutes": session_manager.refinement_service.monthly_usage_minutes,
     }
+
+
+# ──────────── OSS 测试 ────────────
+
+@router.post("/oss/test")
+async def test_oss_connection():
+    """测试 OSS 连接是否正常"""
+    try:
+        info = await oss_service.test_connection()
+        return {"status": "ok", "info": info}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OSS 连接失败: {e}")

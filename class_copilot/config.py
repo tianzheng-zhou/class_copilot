@@ -63,6 +63,14 @@ class Settings(BaseSettings):
         default="", description="豆包离线转写音频文件访问基础URL"
     )
 
+    # 阿里云 OSS（用于上传音频获取公网可访问URL）
+    oss_access_key_id: str = Field(default="", description="阿里云 OSS Access Key ID")
+    oss_access_key_secret: str = Field(default="", description="阿里云 OSS Access Key Secret")
+    oss_bucket_name: str = Field(default="", description="OSS Bucket 名称")
+    oss_endpoint: str = Field(default="", description="OSS Endpoint (如 oss-cn-beijing.aliyuncs.com)")
+    oss_upload_prefix: str = Field(default="class_copilot", description="OSS 上传路径前缀")
+    oss_url_expiry_seconds: int = Field(default=3600, description="OSS 签名URL有效期(秒)")
+
     # 音频配置
     sample_rate: int = Field(default=16000, description="采样率")
     channels: int = Field(default=1, description="声道数")

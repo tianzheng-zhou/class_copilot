@@ -58,7 +58,7 @@ def _pack_audio_frame(pcm: bytes, is_last: bool = False) -> bytes:
     """构建 audio only request 二进制帧"""
     flags = _FLAG_LAST_AUDIO if is_last else _FLAG_NONE
     header = _make_header(_MSG_AUDIO_ONLY, flags, _SERIAL_NONE, _COMPRESS_GZIP)
-    body = gzip.compress(pcm) if pcm else b""
+    body = gzip.compress(pcm)
     return header + struct.pack(">I", len(body)) + body
 
 

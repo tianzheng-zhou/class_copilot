@@ -21,6 +21,7 @@ import httpx
 
 from class_copilot.config import settings
 from class_copilot.logger import refinement_logger
+from class_copilot.services.oss_service import oss_service
 
 
 class DoubaoRefinementService:
@@ -58,13 +59,20 @@ class DoubaoRefinementService:
             refinement_logger.error("豆包离线 ASR 配置不完整: 请设置 doubao_access_token（新版控制台 API Key）")
             return None
 
-        # 构建音频 URL
-        audio_base = settings.doubao_audio_base_url
-        if not audio_base:
-            refinement_logger.error("豆包离线 ASR 需配置 doubao_audio_base_url (例如 http://your-server:8765/api/recordings)")
-            return None
+        # 构建音频 URL：优先使用 OSS 上传获取公网 URL
+        audio_url = None
+        if settings.oss_access_key_id and settings.oss_bucket_name:
+            refinement_logger.info("通过 OSS 上传音频文件: {}", file_path.name)
+            audio_url = await oss_service.upload_file(str(file_path))
+            if not audio_url:
+                refinement_logger.error("OSS 上传失败，尝试回退到本地 URL")
 
-        audio_url = f"{audio_base.rstrip('/')}/{file_path.name}"
+        if not audio_url:
+            audio_base = settings.doubao_audio_base_url
+            if not audio_base:
+                refinement_logger.error("豆包离线 ASR 需配置 OSS 或 doubao_audio_base_url")
+                return None
+            audio_url = f"{audio_base.rstrip('/')}/{file_path.name}"
 
         ext = file_path.suffix.lower().lstrip(".")
         fmt_map = {"mp3": "mp3", "wav": "wav", "ogg": "ogg", "mp4": "mp4"}

@@ -754,7 +754,13 @@ async function loadSettings() {
             <option value="${escapeHtml(fastModel)}">${escapeHtml(fastModel)}（快速）</option>
             <option value="${escapeHtml(qualityModel)}">${escapeHtml(qualityModel)}（高质量）</option>
         `;
-        autoAnswerSelect.value = data.auto_answer_model || fastModel;
+        document.getElementById('settingAutoAnswerModel').value = data.auto_answer_model || fastModel;
+
+        // OSS 设置
+        document.getElementById('settingOssBucket').value = data.oss_bucket_name || '';
+        document.getElementById('settingOssEndpoint').value = data.oss_endpoint || '';
+        document.getElementById('settingOssPrefix').value = data.oss_upload_prefix || 'class_copilot';
+        document.getElementById('settingOssExpiry').value = data.oss_url_expiry_seconds || 3600;
 
         // 更新 Chat 模型选择器显示实际模型名
         const chatModelSelect = document.getElementById('chatModel');
@@ -780,6 +786,12 @@ async function loadSettings() {
             doubaoAppidEl.placeholder = keysData.doubao_appid ? '✅ 已配置' : '未配置';
             const doubaoKey = keysData.doubao_access_token || keysData.doubao_api_key;
             doubaoTokenEl.placeholder = doubaoKey ? `✅ 已配置 (${doubaoKey}) — 留空保持不变` : '未配置';
+
+            // OSS 密钥状态
+            const ossKeyId = keysData.oss_access_key_id;
+            const ossKeySecret = keysData.oss_access_key_secret;
+            document.getElementById('settingOssKeyId').placeholder = ossKeyId ? `✅ 已配置 (${ossKeyId}) — 留空保持不变` : '未配置';
+            document.getElementById('settingOssKeySecret').placeholder = ossKeySecret ? `✅ 已配置 (${ossKeySecret}) — 留空保持不变` : '未配置';
         } catch (e) {
             console.warn('加载密钥状态失败:', e);
         }
@@ -832,6 +844,24 @@ async function saveSettings() {
             });
         }
 
+        // 保存 OSS 密钥
+        const ossKeyId = document.getElementById('settingOssKeyId').value;
+        if (ossKeyId) {
+            await fetch('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: 'oss_access_key_id', value: ossKeyId, is_encrypted: true }),
+            });
+        }
+        const ossKeySecret = document.getElementById('settingOssKeySecret').value;
+        if (ossKeySecret) {
+            await fetch('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: 'oss_access_key_secret', value: ossKeySecret, is_encrypted: true }),
+            });
+        }
+
         // 保存运行时设置
         await fetch('/api/settings/runtime', {
             method: 'PUT',
@@ -849,6 +879,10 @@ async function saveSettings() {
                 refinement_provider: document.getElementById('settingRefinementProvider').value,
                 doubao_audio_base_url: document.getElementById('settingDoubaoAudioBaseUrl').value,
                 auto_answer_model: document.getElementById('settingAutoAnswerModel').value,
+                oss_bucket_name: document.getElementById('settingOssBucket').value,
+                oss_endpoint: document.getElementById('settingOssEndpoint').value,
+                oss_upload_prefix: document.getElementById('settingOssPrefix').value,
+                oss_url_expiry_seconds: parseInt(document.getElementById('settingOssExpiry').value) || 3600,
             }),
         });
 
@@ -866,6 +900,8 @@ async function saveSettings() {
         // 清空密码字段（防止重复保存）
         document.getElementById('settingApiKey').value = '';
         document.getElementById('settingDoubaoToken').value = '';
+        document.getElementById('settingOssKeyId').value = '';
+        document.getElementById('settingOssKeySecret').value = '';
 
         showToast('设置已保存', 'success');
         closeSettings();
@@ -1010,6 +1046,56 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('settingRefinement').addEventListener('change', toggleRefinementSettings);
     document.getElementById('settingAsrProvider').addEventListener('change', toggleDoubaoSettings);
     document.getElementById('settingRefinementProvider').addEventListener('change', toggleDoubaoSettings);
+
+    // OSS 测试连接
+    document.getElementById('btnTestOss').addEventListener('click', async () => {
+        const resultEl = document.getElementById('ossTestResult');
+        resultEl.textContent = '测试中...';
+        resultEl.style.color = '#aaa';
+        try {
+            // 先保存当前填写的OSS配置
+            const ossKeyId = document.getElementById('settingOssKeyId').value;
+            const ossKeySecret = document.getElementById('settingOssKeySecret').value;
+            if (ossKeyId) {
+                await fetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'oss_access_key_id', value: ossKeyId, is_encrypted: true }),
+                });
+            }
+            if (ossKeySecret) {
+                await fetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'oss_access_key_secret', value: ossKeySecret, is_encrypted: true }),
+                });
+            }
+            // 保存运行时 OSS 配置
+            await fetch('/api/settings/runtime', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    oss_bucket_name: document.getElementById('settingOssBucket').value,
+                    oss_endpoint: document.getElementById('settingOssEndpoint').value,
+                    oss_upload_prefix: document.getElementById('settingOssPrefix').value,
+                    oss_url_expiry_seconds: parseInt(document.getElementById('settingOssExpiry').value) || 3600,
+                }),
+            });
+            const resp = await fetch('/api/oss/test', { method: 'POST' });
+            if (resp.ok) {
+                const data = await resp.json();
+                resultEl.textContent = `✅ 连接成功！Bucket: ${data.info.bucket}, 区域: ${data.info.location}`;
+                resultEl.style.color = '#4ade80';
+            } else {
+                const err = await resp.json();
+                resultEl.textContent = `❌ ${err.detail || '连接失败'}`;
+                resultEl.style.color = '#f87171';
+            }
+        } catch (e) {
+            resultEl.textContent = `❌ 请求失败: ${e.message}`;
+            resultEl.style.color = '#f87171';
+        }
+    });
 
     // 设置标签页切换
     document.querySelectorAll('.settings-tab').forEach(tab => {

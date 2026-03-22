@@ -132,8 +132,7 @@
                 <!-- 标签页导航 -->
                 <div class="settings-tabs">
                     <button class="settings-tab active" data-settings-tab="keys">🔑 密钥</button>
-                    <button class="settings-tab" data-settings-tab="asr">🗣️ 语音</button>
-                    <button class="settings-tab" data-settings-tab="audio">🎤 音频</button>
+                    <button class="settings-tab" data-settings-tab="asr">🗣️ 语音</button>                    <button class="settings-tab" data-settings-tab="oss">☁️ OSS</button>                    <button class="settings-tab" data-settings-tab="audio">🎤 音频</button>
                     <button class="settings-tab" data-settings-tab="language">🌐 语言</button>
                     <button class="settings-tab" data-settings-tab="answer">💡 答案</button>
                     <button class="settings-tab" data-settings-tab="refinement">🔄 精修</button>
@@ -181,6 +180,41 @@
                                 <small>豆包离线转写需要音频文件可通过URL下载</small>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- OSS 对象存储 -->
+                    <div class="settings-pane" data-settings-pane="oss">
+                        <div class="form-group">
+                            <label>Access Key ID</label>
+                            <input type="password" id="settingOssKeyId" placeholder="未配置">
+                            <small>阿里云 RAM 用户的 Access Key ID</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Access Key Secret</label>
+                            <input type="password" id="settingOssKeySecret" placeholder="未配置">
+                            <small>阿里云 RAM 用户的 Access Key Secret</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Bucket 名称</label>
+                            <input type="text" id="settingOssBucket" placeholder="my-audio-bucket">
+                        </div>
+                        <div class="form-group">
+                            <label>Endpoint</label>
+                            <input type="text" id="settingOssEndpoint" placeholder="oss-cn-beijing.aliyuncs.com">
+                            <small>不需加 http(s):// 前缀</small>
+                        </div>
+                        <div class="form-group">
+                            <label>上传路径前缀</label>
+                            <input type="text" id="settingOssPrefix" placeholder="class_copilot">
+                            <small>文件会上传到 bucket/前缀/文件名</small>
+                        </div>
+                        <div class="form-group">
+                            <label>签名URL有效期（秒）</label>
+                            <input type="number" id="settingOssExpiry" value="3600" min="300" max="86400">
+                            <small>生成的下载链接有效时长，默认 3600 秒 (1 小时)</small>
+                        </div>
+                        <button id="btnTestOss" class="btn btn-small" style="margin-top:8px;">🔌 测试连接</button>
+                        <span id="ossTestResult" style="margin-left:8px;font-size:0.85em;"></span>
                     </div>
 
                     <!-- 音频 -->
