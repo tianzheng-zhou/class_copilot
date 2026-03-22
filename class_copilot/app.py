@@ -87,6 +87,8 @@ async def _load_saved_settings():
     from class_copilot.models.models import SettingItem
     from class_copilot.services.encryption_service import decrypt_value
 
+    import json
+
     try:
         async with async_session() as db:
             result = await db.execute(select(SettingItem))
@@ -97,7 +99,14 @@ async def _load_saved_settings():
                 if key == "doubao_api_key":
                     key = "doubao_access_token"
                 if hasattr(settings, key):
-                    value = decrypt_value(item.value) if item.is_encrypted else item.value
+                    if item.is_encrypted:
+                        value = decrypt_value(item.value)
+                    else:
+                        # 尝试 JSON 解码以还原 bool/int/float 等类型
+                        try:
+                            value = json.loads(item.value)
+                        except (json.JSONDecodeError, ValueError):
+                            value = item.value
                     setattr(settings, key, value)
                     label = "***" if item.is_encrypted else value
                     logger.info("已加载设置: {} = {}", key, label)

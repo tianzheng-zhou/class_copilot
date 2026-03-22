@@ -985,6 +985,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('settingAsrProvider').addEventListener('change', toggleDoubaoSettings);
     document.getElementById('settingRefinementProvider').addEventListener('change', toggleDoubaoSettings);
 
+    // 设置标签页切换
+    document.querySelectorAll('.settings-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            const pane = document.querySelector(`.settings-pane[data-settings-pane="${tab.dataset.settingsTab}"]`);
+            if (pane) pane.classList.add('active');
+        });
+    });
+
     // 历史返回
     document.getElementById('btnBackToList').addEventListener('click', () => {
         document.getElementById('historyList').style.display = 'block';

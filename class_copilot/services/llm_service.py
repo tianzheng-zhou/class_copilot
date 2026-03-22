@@ -78,7 +78,7 @@ class LLMService:
 
             result_text = response.choices[0].message.content.strip()
             result = json.loads(result_text)
-            llm_logger.info("问题检测结果: {}", result)
+            llm_logger.debug("问题检测原始结果: {}", result)
             return result
 
         except Exception as e:

@@ -124,14 +124,23 @@
 
         <!-- 设置面板 -->
         <div id="settingsModal" class="modal" style="display:none;">
-            <div class="modal-content">
+            <div class="modal-content settings-modal">
                 <div class="modal-header">
                     <h2>设置</h2>
                     <button id="btnCloseSettings" class="btn-close">&times;</button>
                 </div>
+                <!-- 标签页导航 -->
+                <div class="settings-tabs">
+                    <button class="settings-tab active" data-settings-tab="keys">🔑 密钥</button>
+                    <button class="settings-tab" data-settings-tab="asr">🗣️ 语音</button>
+                    <button class="settings-tab" data-settings-tab="audio">🎤 音频</button>
+                    <button class="settings-tab" data-settings-tab="language">🌐 语言</button>
+                    <button class="settings-tab" data-settings-tab="answer">💡 答案</button>
+                    <button class="settings-tab" data-settings-tab="refinement">🔄 精修</button>
+                </div>
                 <div class="modal-body">
-                    <div class="settings-section">
-                        <h3>🔑 API 密钥</h3>
+                    <!-- 密钥 -->
+                    <div class="settings-pane active" data-settings-pane="keys">
                         <div class="form-group">
                             <label>DashScope API Key</label>
                             <input type="password" id="settingApiKey" placeholder="未配置">
@@ -149,8 +158,8 @@
                         </div>
                     </div>
 
-                    <div class="settings-section">
-                        <h3>🗣️ ASR 提供商</h3>
+                    <!-- 语音识别 -->
+                    <div class="settings-pane" data-settings-pane="asr">
                         <div class="form-group">
                             <label>实时语音识别（流式）</label>
                             <select id="settingAsrProvider">
@@ -174,8 +183,8 @@
                         </div>
                     </div>
 
-                    <div class="settings-section">
-                        <h3>🎤 音频设置</h3>
+                    <!-- 音频 -->
+                    <div class="settings-pane" data-settings-pane="audio">
                         <div class="form-group">
                             <label>麦克风</label>
                             <select id="settingMicrophone"></select>
@@ -186,8 +195,8 @@
                         </div>
                     </div>
 
-                    <div class="settings-section">
-                        <h3>🌐 语言</h3>
+                    <!-- 语言 -->
+                    <div class="settings-pane" data-settings-pane="language">
                         <div class="form-group">
                             <label>授课语言</label>
                             <select id="settingLanguage">
@@ -207,8 +216,8 @@
                         </div>
                     </div>
 
-                    <div class="settings-section">
-                        <h3>💡 答案设置</h3>
+                    <!-- 答案 -->
+                    <div class="settings-pane" data-settings-pane="answer">
                         <div class="form-group">
                             <label><input type="checkbox" id="settingBrief" checked> 简洁版答案</label>
                         </div>
@@ -217,8 +226,8 @@
                         </div>
                     </div>
 
-                    <div class="settings-section">
-                        <h3>🔄 高精度精修（可选）</h3>
+                    <!-- 精修 -->
+                    <div class="settings-pane" data-settings-pane="refinement">
                         <div class="form-group">
                             <label><input type="checkbox" id="settingRefinement"> 启用高精度精修</label>
                             <small>会产生额外 API 费用</small>

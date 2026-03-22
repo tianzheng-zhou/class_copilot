@@ -334,10 +334,28 @@ async def get_runtime_settings():
 
 @router.put("/settings/runtime")
 async def update_runtime_settings(data: dict):
-    """更新运行时设置"""
-    for key, value in data.items():
-        if hasattr(settings, key):
+    """更新运行时设置并持久化到数据库"""
+    import json
+
+    async with async_session() as db:
+        for key, value in data.items():
+            if not hasattr(settings, key):
+                continue
+            # 更新内存
             setattr(settings, key, value)
+            # 持久化到数据库（JSON 编码以保留类型）
+            str_value = json.dumps(value, ensure_ascii=False)
+            result = await db.execute(
+                select(SettingItem).where(SettingItem.key == key)
+            )
+            item = result.scalar_one_or_none()
+            if item:
+                item.value = str_value
+                item.is_encrypted = False
+            else:
+                db.add(SettingItem(key=key, value=str_value, is_encrypted=False))
+        await db.commit()
+
     return {"status": "updated"}
 
 
