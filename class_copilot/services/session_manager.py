@@ -197,9 +197,10 @@ class SessionManager:
         self.is_listening = False
         self.status = "stopped"
 
-        # 取消后台任务
+        # 取消后台任务（跳过当前正在执行的任务，避免取消自身导致后续代码无法执行）
+        current_task = asyncio.current_task()
         for task in [self._asr_feed_task, self._asr_process_task, self._detection_task, self._auto_stop_task]:
-            if task:
+            if task and task is not current_task:
                 task.cancel()
 
         # 停止ASR
@@ -472,9 +473,6 @@ class SessionManager:
             "source": source,
             "confidence": confidence,
         })
-
-        # 发送 Windows 通知
-        asyncio.create_task(self.notification_service.notify_question(question_text))
 
         # 并行生成简洁版和展开版答案
         if settings.enable_brief_answer:

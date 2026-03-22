@@ -345,8 +345,6 @@ function handleQuestionDetected(data) {
     state.questions.unshift(question);
     renderAnswers();
 
-    // 切换到回答标签
-    switchTab('answers');
     showToast(`检测到问题: ${data.question.substring(0, 50)}...`, 'success');
 }
 
@@ -616,23 +614,33 @@ async function loadRefinedTranscriptions(sessionId) {
 }
 
 // ──────────── 定时停止 ────────────
-function getAutoStopInfo() {
+function getAutoStopInfo(showWarning = false) {
     const timeInput = document.getElementById('autoStopTime');
     const val = timeInput.value; // "HH:MM" or ""
     if (!val) return { seconds: 0, label: '' };
 
-    const [h, m] = val.split(':').map(Number);
+    const parts = val.split(':').map(Number);
+    const h = parts[0], m = parts[1] || 0;
     const now = new Date();
-    const target = new Date(now);
-    target.setHours(h, m, 0, 0);
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0);
 
     // 如果目标时间已过（今天内），视为无效
-    let diffMs = target - now;
+    let diffMs = target.getTime() - now.getTime();
     if (diffMs <= 0) {
+        if (showWarning) {
+            showToast(`定时停止时间 ${val} 已过，未设置定时`, 'error');
+        }
         return { seconds: 0, label: '' };
     }
 
     return { seconds: Math.ceil(diffMs / 1000), label: val };
+}
+
+function formatCountdown(remaining) {
+    const hours = Math.floor(remaining / 3600);
+    const min = String(Math.floor((remaining % 3600) / 60)).padStart(2, '0');
+    const sec = String(remaining % 60).padStart(2, '0');
+    return hours > 0 ? `${hours}:${min}:${sec}` : `${min}:${sec}`;
 }
 
 function handleAutoStopTick(data) {
@@ -640,10 +648,7 @@ function handleAutoStopTick(data) {
     const el = document.getElementById('autoStopCountdown');
     if (remaining > 0) {
         el.style.display = 'inline';
-        const hours = Math.floor(remaining / 3600);
-        const min = String(Math.floor((remaining % 3600) / 60)).padStart(2, '0');
-        const sec = String(remaining % 60).padStart(2, '0');
-        el.textContent = hours > 0 ? `⏱️ ${hours}:${min}:${sec}` : `⏱️ ${min}:${sec}`;
+        el.textContent = `⏱️ ${formatCountdown(remaining)}`;
         // 最后60秒变红色警告
         el.style.color = remaining <= 60 ? '#f87171' : '';
     } else {
@@ -742,7 +747,7 @@ function recallSession(sessionId) {
         showToast('请先停止当前监听', 'error');
         return;
     }
-    const { seconds, label } = getAutoStopInfo();
+    const { seconds, label } = getAutoStopInfo(true);
     sendMessage('recall_session', { session_id: sessionId, auto_stop_seconds: seconds, auto_stop_label: label });
 }
 
@@ -1184,8 +1189,11 @@ document.addEventListener('DOMContentLoaded', () => {
             sendMessage('stop_listening');
         } else {
             const courseName = document.getElementById('courseInput').value.trim();
-            const { seconds, label } = getAutoStopInfo();
+            const { seconds, label } = getAutoStopInfo(true);
             sendMessage('start_listening', { course_name: courseName, auto_stop_seconds: seconds, auto_stop_label: label });
+            if (seconds > 0) {
+                showToast(`已设置定时停止：${label}（${formatCountdown(seconds)}后）`, 'success');
+            }
         }
     });
 
@@ -1195,6 +1203,19 @@ document.addEventListener('DOMContentLoaded', () => {
         // 如果正在监听，通知后端取消定时
         if (state.isListening) {
             sendMessage('update_auto_stop', { seconds: 0 });
+            showToast('已取消定时停止');
+        }
+    });
+
+    // 定时停止时间变更 - 即时反馈 + 监听中可实时更新
+    document.getElementById('autoStopTime').addEventListener('change', () => {
+        const { seconds, label } = getAutoStopInfo(true);
+        if (seconds > 0 && state.isListening) {
+            // 监听中更改时间：实时更新后端定时器
+            sendMessage('update_auto_stop', { seconds, label });
+            showToast(`定时停止已更新为 ${label}（${formatCountdown(seconds)}后）`, 'success');
+        } else if (seconds > 0) {
+            showToast(`开始监听后将在 ${label} 自动停止（${formatCountdown(seconds)}后）`);
         }
     });
 
