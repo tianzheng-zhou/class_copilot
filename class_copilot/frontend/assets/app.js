@@ -322,6 +322,7 @@ function handleAnswerGenerating(data) {
     const q = state.questions.find(q => q.id === data.question_id);
     if (q) {
         q.generating[data.answer_type] = true;
+        if (data.model) q.model = data.model;
         renderAnswers();
     }
 }
@@ -355,12 +356,13 @@ function renderAnswers() {
         const showType = q.showDetailed ? 'detailed' : 'brief';
         const answerText = q.answers[showType] || '';
         const isGenerating = q.generating[showType];
+        const modelTag = q.model ? `<span class="answer-model-tag">${escapeHtml(q.model)}</span>` : '';
 
         return `
             <div class="answer-card" data-qid="${q.id}">
                 <div class="answer-card-header">
                     <div class="answer-card-question">${escapeHtml(q.text)}</div>
-                    <div class="answer-card-source">${q.sourceIcon}</div>
+                    <div class="answer-card-source">${q.sourceIcon} ${modelTag}</div>
                 </div>
                 <div class="answer-card-body">
                     <div class="answer-toggle">
@@ -415,11 +417,12 @@ function updateLastAIMessage(content, isFinal) {
     let lastAI = area.querySelector('.chat-message-ai:last-child');
 
     if (!lastAI) {
+        const modelLabel = state._chatModelLabel || '';
         lastAI = document.createElement('div');
         lastAI.className = 'chat-message chat-message-ai';
         lastAI.innerHTML = `
             <div class="chat-bubble">
-                <div class="chat-role">🤖 AI</div>
+                <div class="chat-role">🤖 AI <span class="answer-model-tag">${escapeHtml(modelLabel)}</span></div>
                 <div class="chat-content"></div>
             </div>
         `;
@@ -442,8 +445,12 @@ function sendChat() {
     const question = input.value.trim();
     if (!question) return;
 
-    const model = document.getElementById('chatModel').value || undefined;
+    const modelValue = document.getElementById('chatModel').value || 'quality';
+    const modelLabel = document.getElementById('chatModel').selectedOptions[0]?.text || modelValue;
     const thinkMode = document.getElementById('chatThinkMode').checked;
+
+    // 记录当前聊天使用的模型名
+    state._chatModelLabel = modelLabel;
 
     // 添加用户消息
     const area = document.getElementById('chatArea');
@@ -462,7 +469,7 @@ function sendChat() {
     area.scrollTop = area.scrollHeight;
 
     // 发送
-    sendMessage('chat', { question, model, think_mode: thinkMode });
+    sendMessage('chat', { question, model: modelValue, think_mode: thinkMode });
     input.value = '';
 }
 
@@ -737,6 +744,24 @@ async function loadSettings() {
         document.getElementById('settingAsrProvider').value = data.asr_provider || 'dashscope';
         document.getElementById('settingRefinementProvider').value = data.refinement_provider || 'dashscope';
         document.getElementById('settingDoubaoAudioBaseUrl').value = data.doubao_audio_base_url || '';
+        document.getElementById('settingAutoAnswerModel').value = data.auto_answer_model || 'qwen3.5-flash';
+
+        // 更新自动回答模型选择器的选项
+        const autoAnswerSelect = document.getElementById('settingAutoAnswerModel');
+        const fastModel = data.llm_model_fast || 'qwen3.5-flash';
+        const qualityModel = data.llm_model_quality || 'qwen3.5-plus';
+        autoAnswerSelect.innerHTML = `
+            <option value="${escapeHtml(fastModel)}">${escapeHtml(fastModel)}（快速）</option>
+            <option value="${escapeHtml(qualityModel)}">${escapeHtml(qualityModel)}（高质量）</option>
+        `;
+        autoAnswerSelect.value = data.auto_answer_model || fastModel;
+
+        // 更新 Chat 模型选择器显示实际模型名
+        const chatModelSelect = document.getElementById('chatModel');
+        chatModelSelect.innerHTML = `
+            <option value="fast">${escapeHtml(data.llm_model_fast || 'qwen3.5-flash')}</option>
+            <option value="quality">${escapeHtml(data.llm_model_quality || 'qwen3.5-plus')}</option>
+        `;
 
         toggleRefinementSettings();
         toggleDoubaoSettings();
@@ -823,6 +848,7 @@ async function saveSettings() {
                 asr_provider: document.getElementById('settingAsrProvider').value,
                 refinement_provider: document.getElementById('settingRefinementProvider').value,
                 doubao_audio_base_url: document.getElementById('settingDoubaoAudioBaseUrl').value,
+                auto_answer_model: document.getElementById('settingAutoAnswerModel').value,
             }),
         });
 

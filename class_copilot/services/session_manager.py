@@ -448,6 +448,7 @@ class SessionManager:
         await self._broadcast("answer_generating", {
             "question_id": question_id,
             "answer_type": answer_type,
+            "model": settings.auto_answer_model,
         })
 
         # 流式生成
@@ -508,13 +509,21 @@ class SessionManager:
         # 获取课堂上下文（使用最优版本）
         context = await self._get_session_context()
 
+        # 解析模型别名
+        if model == "fast":
+            use_model = settings.llm_model_fast
+        elif model == "quality":
+            use_model = settings.llm_model_quality
+        else:
+            use_model = model
+
         # 流式生成回答
         full_response = ""
         async for chunk in self.llm_service.chat(
             user_question=user_question,
             context=context,
             course_name=self.current_course_name,
-            model=model,
+            model=use_model,
             think_mode=think_mode,
         ):
             full_response += chunk
@@ -529,7 +538,7 @@ class SessionManager:
                 session_id=self.current_session_id,
                 role="assistant",
                 content=full_response,
-                model_used=model or settings.llm_model_quality,
+                model_used=use_model or settings.llm_model_quality,
                 think_mode=think_mode,
             )
             db.add(msg)

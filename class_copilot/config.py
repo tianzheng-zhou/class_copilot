@@ -28,8 +28,9 @@ class Settings(BaseSettings):
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
         description="LLM API 基础URL",
     )
-    llm_model_fast: str = Field(default="qwen-plus", description="快速LLM模型")
-    llm_model_quality: str = Field(default="qwen-max", description="高质量LLM模型")
+    llm_model_fast: str = Field(default="qwen3.5-flash", description="快速LLM模型")
+    llm_model_quality: str = Field(default="qwen3.5-plus", description="高质量LLM模型")
+    auto_answer_model: str = Field(default="qwen3.5-flash", description="自动回答使用的模型 (fast/quality)")
 
     # ASR 提供商选择
     asr_provider: Literal["dashscope", "doubao"] = Field(

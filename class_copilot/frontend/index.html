@@ -89,8 +89,8 @@
                 <div class="chat-input-area">
                     <div class="chat-options">
                         <select id="chatModel">
-                            <option value="">快速模型</option>
-                            <option value="qwen-max">高质量模型</option>
+                            <option value="fast">qwen3.5-flash</option>
+                            <option value="quality">qwen3.5-plus</option>
                         </select>
                         <label class="checkbox-label">
                             <input type="checkbox" id="chatThinkMode"> 深度思考
@@ -218,6 +218,14 @@
 
                     <!-- 答案 -->
                     <div class="settings-pane" data-settings-pane="answer">
+                        <div class="form-group">
+                            <label>自动回答模型</label>
+                            <select id="settingAutoAnswerModel">
+                                <option value="qwen3.5-flash">qwen3.5-flash（快速）</option>
+                                <option value="qwen3.5-plus">qwen3.5-plus（高质量）</option>
+                            </select>
+                            <small>检测到问题后自动生成答案使用的模型</small>
+                        </div>
                         <div class="form-group">
                             <label><input type="checkbox" id="settingBrief" checked> 简洁版答案</label>
                         </div>

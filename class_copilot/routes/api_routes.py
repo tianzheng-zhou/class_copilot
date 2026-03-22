@@ -329,6 +329,9 @@ async def get_runtime_settings():
         "asr_provider": settings.asr_provider,
         "refinement_provider": settings.refinement_provider,
         "doubao_audio_base_url": settings.doubao_audio_base_url,
+        "auto_answer_model": settings.auto_answer_model,
+        "llm_model_fast": settings.llm_model_fast,
+        "llm_model_quality": settings.llm_model_quality,
     }
 
 

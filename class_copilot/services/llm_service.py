@@ -74,6 +74,7 @@ class LLMService:
                 temperature=0.1,
                 max_tokens=200,
                 response_format={"type": "json_object"},
+                extra_body={"enable_thinking": False},
             )
 
             result_text = response.choices[0].message.content.strip()
@@ -119,8 +120,9 @@ class LLMService:
 
         try:
             client = self._get_client()
+            use_model = settings.auto_answer_model
             stream = await client.chat.completions.create(
-                model=settings.llm_model_fast,
+                model=use_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
@@ -128,6 +130,7 @@ class LLMService:
                 temperature=0.7,
                 max_tokens=500 if answer_type == "brief" else 1000,
                 stream=True,
+                extra_body={"enable_thinking": False},
             )
 
             async for chunk in stream:
@@ -188,6 +191,8 @@ class LLMService:
             extra_params = {}
             if think_mode:
                 extra_params["extra_body"] = {"enable_thinking": True}
+            else:
+                extra_params["extra_body"] = {"enable_thinking": False}
 
             stream = await client.chat.completions.create(
                 model=use_model,
@@ -220,6 +225,7 @@ class LLMService:
                 ],
                 temperature=0.1,
                 max_tokens=1000,
+                extra_body={"enable_thinking": False},
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
