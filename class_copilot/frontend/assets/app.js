@@ -809,10 +809,12 @@ function renderHistoryList(sessions) {
             ? `<button class="btn btn-small btn-recall" onclick="event.stopPropagation();recallSession('${s.id}')" title="恢复此会话继续转录">🔄 恢复</button>`
             : '';
 
+        const startTime = s.started_at ? new Date(s.started_at).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) : '';
+
         return `
             <div class="history-item" onclick="viewSession('${s.id}')">
                 <div class="history-item-info">
-                    <div class="history-item-date">${escapeHtml(s.date)}</div>
+                    <div class="history-item-date">${escapeHtml(s.date)}${startTime ? ' ' + startTime : ''}</div>
                     <div class="history-item-course">${escapeHtml(s.course_name)}</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
