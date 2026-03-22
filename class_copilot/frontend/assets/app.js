@@ -143,6 +143,12 @@ function handleServerMessage(msg) {
                 showToast(data.message);
             }
             break;
+        case 'auto_stop_tick':
+            handleAutoStopTick(data);
+            break;
+        case 'recall_data':
+            handleRecallData(data);
+            break;
         case 'info':
             showToast(data.message);
             break;
@@ -161,6 +167,19 @@ function handleStatus(data) {
     // 跟踪所有会话ID，用于精修结果累积显示
     if (data.session_id && !state.sessionIds.includes(data.session_id)) {
         state.sessionIds.push(data.session_id);
+    }
+
+    // 更新课程名
+    if (data.course_name) {
+        state.courseName = data.course_name;
+        document.getElementById('courseInput').value = data.course_name;
+    }
+
+    // 更新自动停止倒计时
+    if (data.auto_stop_remaining > 0) {
+        handleAutoStopTick({ remaining: data.auto_stop_remaining });
+    } else {
+        document.getElementById('autoStopCountdown').style.display = 'none';
     }
 
     updateListenButton();
@@ -222,6 +241,7 @@ function stopRecordingTimer() {
         state.recordingTimer = null;
     }
     document.getElementById('recordingTime').style.display = 'none';
+    document.getElementById('autoStopCountdown').style.display = 'none';
 }
 
 // ──────────── 转写处理 ────────────
@@ -595,6 +615,137 @@ async function loadRefinedTranscriptions(sessionId) {
     }
 }
 
+// ──────────── 定时停止 ────────────
+function getAutoStopInfo() {
+    const timeInput = document.getElementById('autoStopTime');
+    const val = timeInput.value; // "HH:MM" or ""
+    if (!val) return { seconds: 0, label: '' };
+
+    const [h, m] = val.split(':').map(Number);
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(h, m, 0, 0);
+
+    // 如果目标时间已过（今天内），视为无效
+    let diffMs = target - now;
+    if (diffMs <= 0) {
+        return { seconds: 0, label: '' };
+    }
+
+    return { seconds: Math.ceil(diffMs / 1000), label: val };
+}
+
+function handleAutoStopTick(data) {
+    const remaining = data.remaining;
+    const el = document.getElementById('autoStopCountdown');
+    if (remaining > 0) {
+        el.style.display = 'inline';
+        const hours = Math.floor(remaining / 3600);
+        const min = String(Math.floor((remaining % 3600) / 60)).padStart(2, '0');
+        const sec = String(remaining % 60).padStart(2, '0');
+        el.textContent = hours > 0 ? `⏱️ ${hours}:${min}:${sec}` : `⏱️ ${min}:${sec}`;
+        // 最后60秒变红色警告
+        el.style.color = remaining <= 60 ? '#f87171' : '';
+    } else {
+        el.style.display = 'none';
+    }
+}
+
+// ──────────── 会话恢复 (Recall) ────────────
+function handleRecallData(data) {
+    // 清空当前面板
+    const transArea = document.getElementById('transcriptionArea');
+    transArea.innerHTML = '';
+
+    const answersArea = document.getElementById('answersArea');
+    state.questions = [];
+
+    const chatArea = document.getElementById('chatArea');
+    chatArea.innerHTML = '';
+
+    // 设置当前会话信息
+    state.sessionId = data.session_id;
+    state.courseName = data.course_name;
+    if (data.session_id && !state.sessionIds.includes(data.session_id)) {
+        state.sessionIds.push(data.session_id);
+    }
+
+    document.getElementById('courseInput').value = data.course_name || '';
+
+    // 恢复转写记录
+    if (data.transcriptions && data.transcriptions.length > 0) {
+        data.transcriptions.forEach(t => {
+            const el = createTransSegment(
+                t.speaker_label, t.is_teacher, t.text, false,
+                t.start_time, t.end_time
+            );
+            el.classList.add('recalled');
+            transArea.appendChild(el);
+        });
+    }
+
+    // 恢复问题和答案
+    if (data.questions && data.questions.length > 0) {
+        const sourceIcons = { auto: '🔍', manual: '✋', forced: '💬', refined: '🔄' };
+        data.questions.forEach(q => {
+            state.questions.push({
+                id: q.question_id,
+                text: q.question,
+                source: q.source,
+                sourceIcon: sourceIcons[q.source] || '🔍',
+                confidence: q.confidence,
+                answers: q.answers || { brief: '', detailed: '' },
+                generating: { brief: false, detailed: false },
+                showDetailed: false,
+            });
+        });
+        renderAnswers();
+    }
+
+    // 恢复聊天记录
+    if (data.chat_messages && data.chat_messages.length > 0) {
+        data.chat_messages.forEach(m => {
+            const msgEl = document.createElement('div');
+            if (m.role === 'user') {
+                msgEl.className = 'chat-message chat-message-user';
+                msgEl.innerHTML = `
+                    <div class="chat-bubble">
+                        <div class="chat-role">🙋 你</div>
+                        <div class="chat-content">${escapeHtml(m.content)}</div>
+                    </div>
+                `;
+            } else {
+                msgEl.className = 'chat-message chat-message-ai';
+                msgEl.innerHTML = `
+                    <div class="chat-bubble">
+                        <div class="chat-role">🤖 AI ${m.model_used ? '<span class="answer-model-tag">' + escapeHtml(m.model_used) + '</span>' : ''}</div>
+                        <div class="chat-content">${renderer.render(m.content)}</div>
+                    </div>
+                `;
+            }
+            chatArea.appendChild(msgEl);
+        });
+        highlightCode();
+    }
+
+    // 切换到转写标签页
+    switchTab('transcription');
+    showToast(`已恢复会话: ${data.course_name}`, 'success');
+
+    // 关闭历史详情视图（如果打开了的话）
+    document.getElementById('historyList').style.display = 'block';
+    document.getElementById('historyDetail').style.display = 'none';
+}
+
+function recallSession(sessionId) {
+    if (state.isListening) {
+        showToast('请先停止当前监听', 'error');
+        return;
+    }
+    const { seconds, label } = getAutoStopInfo();
+    sendMessage('recall_session', { session_id: sessionId, auto_stop_seconds: seconds, auto_stop_label: label });
+}
+
 // ──────────── 转写子标签页 ────────────
 function switchSubTab(subtabName) {
     const panel = document.getElementById('tab-transcription');
@@ -653,6 +804,11 @@ function renderHistoryList(sessions) {
             ? `<span class="refinement-status">${s.refinement_status === 'completed' ? '✓ 已精修' : '🔄 精修中'}</span>`
             : '';
 
+        // 仅对已停止或中断的会话显示恢复按钮
+        const recallBtn = (s.status === 'stopped' || s.status === 'interrupted')
+            ? `<button class="btn btn-small btn-recall" onclick="event.stopPropagation();recallSession('${s.id}')" title="恢复此会话继续转录">🔄 恢复</button>`
+            : '';
+
         return `
             <div class="history-item" onclick="viewSession('${s.id}')">
                 <div class="history-item-info">
@@ -663,6 +819,7 @@ function renderHistoryList(sessions) {
                     <span class="history-item-status">${statusBadge}</span>
                     ${refineBadge}
                     <div class="history-item-actions">
+                        ${recallBtn}
                         <button class="btn btn-small" onclick="event.stopPropagation();exportSession('${s.id}')">📥 导出</button>
                         <button class="btn btn-small" onclick="event.stopPropagation();deleteSession('${s.id}')">🗑️</button>
                     </div>
@@ -1025,7 +1182,17 @@ document.addEventListener('DOMContentLoaded', () => {
             sendMessage('stop_listening');
         } else {
             const courseName = document.getElementById('courseInput').value.trim();
-            sendMessage('start_listening', { course_name: courseName });
+            const { seconds, label } = getAutoStopInfo();
+            sendMessage('start_listening', { course_name: courseName, auto_stop_seconds: seconds, auto_stop_label: label });
+        }
+    });
+
+    // 清除定时停止
+    document.getElementById('btnClearAutoStop').addEventListener('click', () => {
+        document.getElementById('autoStopTime').value = '';
+        // 如果正在监听，通知后端取消定时
+        if (state.isListening) {
+            sendMessage('update_auto_stop', { seconds: 0 });
         }
     });
 

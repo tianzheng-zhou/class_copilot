@@ -25,6 +25,11 @@
                 </div>
             </div>
             <div class="navbar-center">
+                <div class="auto-stop-input">
+                    <label for="autoStopTime" title="定时停止：设置一个时间点自动停止转录">⏱️</label>
+                    <input type="time" id="autoStopTime" title="设置自动停止的时间点（留空=不限制）">
+                    <button id="btnClearAutoStop" class="btn-clear-time" title="清除定时">&times;</button>
+                </div>
                 <button id="btnToggleListen" class="btn btn-primary btn-listen" title="Ctrl+Shift+S">
                     <span class="btn-icon">🎤</span>
                     <span class="btn-text">开始监听</span>
@@ -40,6 +45,7 @@
         <div class="status-bar">
             <span id="statusText">就绪</span>
             <span id="refinementStatus" class="refinement-status" style="display:none;"></span>
+            <span id="autoStopCountdown" class="auto-stop-countdown" style="display:none;" title="剩余自动停止时间">⏱️ --:--</span>
             <span id="filterMode" class="filter-badge" title="Ctrl+Shift+F">仅教师</span>
             <span id="recordingTime" class="recording-time" style="display:none;">00:00</span>
         </div>

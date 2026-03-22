@@ -200,6 +200,67 @@ body {
     color: var(--warning);
 }
 
+.auto-stop-countdown {
+    font-family: monospace;
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.auto-stop-input {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 8px;
+}
+
+.auto-stop-input input[type="time"] {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    padding: 2px 6px;
+    font-size: 13px;
+    width: 90px;
+}
+
+.auto-stop-input input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.7);
+}
+
+.auto-stop-input label {
+    font-size: 14px;
+    cursor: help;
+}
+
+.btn-clear-time {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.btn-clear-time:hover {
+    color: var(--text-primary);
+}
+
+.btn-recall {
+    background: var(--accent);
+    color: white;
+}
+
+.btn-recall:hover {
+    filter: brightness(1.2);
+}
+
+.trans-segment.recalled {
+    opacity: 0.8;
+    border-left: 2px solid var(--accent);
+    padding-left: 8px;
+}
+
 /* ──────────── Tabs ──────────── */
 .tabs {
     display: flex;

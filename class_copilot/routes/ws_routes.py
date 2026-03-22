@@ -53,6 +53,7 @@ async def websocket_endpoint(websocket: WebSocket):
             "course_name": session_manager.current_course_name,
             "is_listening": session_manager.is_listening,
             "filter_mode": settings.llm_filter_mode,
+            "auto_stop_remaining": session_manager._auto_stop_remaining,
         },
     })
 
@@ -80,7 +81,9 @@ async def _handle_client_message(message: dict):
 
     if msg_type == "start_listening":
         course_name = data.get("course_name", "")
-        await session_manager.start_listening(course_name)
+        auto_stop_seconds = data.get("auto_stop_seconds", 0)
+        auto_stop_label = data.get("auto_stop_label", "")
+        await session_manager.start_listening(course_name, auto_stop_seconds, auto_stop_label)
 
     elif msg_type == "stop_listening":
         await session_manager.stop_listening()
@@ -134,6 +137,18 @@ async def _handle_client_message(message: dict):
                 "context": await session_manager._get_session_context(),
             }
             await session_manager._handle_detected_question(detection, "forced")
+
+    elif msg_type == "recall_session":
+        recall_session_id = data.get("session_id", "")
+        auto_stop_seconds = data.get("auto_stop_seconds", 0)
+        auto_stop_label = data.get("auto_stop_label", "")
+        if recall_session_id:
+            await session_manager.recall_session(recall_session_id, auto_stop_seconds, auto_stop_label)
+
+    elif msg_type == "update_auto_stop":
+        seconds = data.get("seconds", 0)
+        label = data.get("label", "")
+        await session_manager.update_auto_stop(seconds, label)
 
     else:
         ws_logger.warning("未知消息类型: {}", msg_type)

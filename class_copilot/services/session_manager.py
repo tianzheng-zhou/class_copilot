@@ -1,17 +1,19 @@
 """会话管理器 - 协调所有服务的中枢"""
 
 import asyncio
+import calendar
 import time
 from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from class_copilot.config import settings
 from class_copilot.database import async_session
 from class_copilot.models.models import (
-    Course, Session, Recording, Transcription, Question, Answer,
+    Course, Session, Recording, Transcription, Question, Answer, ChatMessage,
 )
 from class_copilot.services.audio_service import AudioService
 from class_copilot.services.asr_service import RealtimeASRService
@@ -52,6 +54,11 @@ class SessionManager:
         self._asr_feed_task: asyncio.Task | None = None
         self._asr_process_task: asyncio.Task | None = None
         self._detection_task: asyncio.Task | None = None
+        self._auto_stop_task: asyncio.Task | None = None
+
+        # 定时停止
+        self._auto_stop_label: str = ""  # 显示标签（如 "10:30"）
+        self._auto_stop_remaining: int = 0  # 剩余秒数
 
         # 转写序号
         self._transcription_seq = 0
@@ -89,7 +96,7 @@ class SessionManager:
             return DoubaoRefinementService()
         return RefinementService()
 
-    async def start_listening(self, course_name: str = ""):
+    async def start_listening(self, course_name: str = "", auto_stop_seconds: int = 0, auto_stop_label: str = ""):
         """开始监听（录音+ASR）"""
         if self.is_listening:
             logger.warning("已在监听中")
@@ -165,8 +172,21 @@ class SessionManager:
         self._asr_process_task = asyncio.create_task(self._process_asr_results())
         self._detection_task = asyncio.create_task(self._auto_detect_loop())
 
+        # 定时停止
+        self._auto_stop_label = auto_stop_label
+        if auto_stop_seconds > 0:
+            self._auto_stop_remaining = auto_stop_seconds
+            self._auto_stop_task = asyncio.create_task(self._auto_stop_loop())
+        else:
+            self._auto_stop_remaining = 0
+            self._auto_stop_task = None
+
         update_icon_recording(True)
-        await self._broadcast("status", {"status": "listening", "session_id": self.current_session_id})
+        await self._broadcast("status", {
+            "status": "listening",
+            "session_id": self.current_session_id,
+            "auto_stop_remaining": self._auto_stop_remaining,
+        })
         logger.info("开始监听: session={}, course={}", self.current_session_id, course_name)
 
     async def stop_listening(self):
@@ -178,7 +198,7 @@ class SessionManager:
         self.status = "stopped"
 
         # 取消后台任务
-        for task in [self._asr_feed_task, self._asr_process_task, self._detection_task]:
+        for task in [self._asr_feed_task, self._asr_process_task, self._detection_task, self._auto_stop_task]:
             if task:
                 task.cancel()
 
@@ -719,6 +739,230 @@ class SessionManager:
         """手动触发精修"""
         if self.current_session_id:
             asyncio.create_task(self._start_post_refinement())
+
+    # ──────────── 定时停止 ────────────
+
+    async def _auto_stop_loop(self):
+        """定时停止循环：每秒广播剩余时间，到时间后自动停止"""
+        try:
+            while self.is_listening and self._auto_stop_remaining > 0:
+                await asyncio.sleep(1)
+                self._auto_stop_remaining -= 1
+
+                # 每10秒广播一次剩余时间，最后60秒每秒广播
+                if self._auto_stop_remaining <= 60 or self._auto_stop_remaining % 10 == 0:
+                    await self._broadcast("auto_stop_tick", {
+                        "remaining": self._auto_stop_remaining,
+                    })
+
+                # 最后30秒警告
+                if self._auto_stop_remaining == 30:
+                    await self._broadcast("notification", {
+                        "type": "warning",
+                        "message": "转录将在30秒后自动停止",
+                    })
+
+            if self.is_listening and self._auto_stop_remaining <= 0:
+                label = self._auto_stop_label or "预设时间"
+                logger.info("定时停止: 已达 {}", label)
+                await self._broadcast("notification", {
+                    "type": "info",
+                    "message": f"已达定时停止时间 {label}，自动停止转录",
+                })
+                await self.stop_listening()
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("定时停止循环异常: {}", e)
+
+    async def update_auto_stop(self, seconds: int, label: str = ""):
+        """更新定时停止时间（运行中也可调整）"""
+        if seconds <= 0:
+            # 取消定时停止
+            self._auto_stop_label = ""
+            self._auto_stop_remaining = 0
+            if self._auto_stop_task:
+                self._auto_stop_task.cancel()
+                self._auto_stop_task = None
+            await self._broadcast("auto_stop_tick", {"remaining": 0})
+            return
+
+        self._auto_stop_label = label
+        self._auto_stop_remaining = seconds
+        # 如果正在监听，重启定时任务
+        if self.is_listening:
+            if self._auto_stop_task:
+                self._auto_stop_task.cancel()
+            self._auto_stop_task = asyncio.create_task(self._auto_stop_loop())
+        await self._broadcast("auto_stop_tick", {"remaining": self._auto_stop_remaining})
+
+    # ──────────── 会话恢复 (Recall) ────────────
+
+    async def recall_session(self, session_id: str, auto_stop_seconds: int = 0, auto_stop_label: str = ""):
+        """恢复历史会话：加载历史数据到前端，并继续录制转写"""
+        if self.is_listening:
+            logger.warning("正在监听中，请先停止当前会话")
+            await self._broadcast("error", {"message": "请先停止当前会话再恢复历史会话"})
+            return
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(Session)
+                .options(selectinload(Session.course))
+                .where(Session.id == session_id)
+            )
+            session = result.scalar_one_or_none()
+            if not session:
+                await self._broadcast("error", {"message": "会话不存在"})
+                return
+
+            course_name = session.course.name if session.course else ""
+            course_id = session.course_id
+
+            # 加载历史转写
+            trans_result = await db.execute(
+                select(Transcription)
+                .where(Transcription.session_id == session_id)
+                .where(Transcription.is_final == True)
+                .order_by(Transcription.sequence)
+            )
+            transcriptions = trans_result.scalars().all()
+
+            # 加载历史问题和答案
+            q_result = await db.execute(
+                select(Question)
+                .options(selectinload(Question.answers))
+                .where(Question.session_id == session_id)
+                .order_by(Question.created_at)
+            )
+            questions = q_result.scalars().all()
+
+            # 加载聊天记录
+            chat_result = await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session_id)
+                .order_by(ChatMessage.created_at)
+            )
+            chat_messages = chat_result.scalars().all()
+
+            # 获取序号
+            max_seq = max((t.sequence for t in transcriptions), default=0)
+
+        # 将历史会话设为当前会话
+        self.current_session_id = session_id
+        self.current_course_name = course_name
+        self._transcription_seq = max_seq
+
+        # 广播 recall_data，前端接收后填充UI
+        session_epoch = calendar.timegm(session.started_at.timetuple()) if session.started_at else 0
+
+        recall_transcriptions = [{
+            "text": t.best_text,
+            "realtime_text": t.realtime_text,
+            "refined_text": t.refined_text,
+            "is_final": True,
+            "speaker_label": t.speaker_label,
+            "is_teacher": t.is_teacher,
+            "start_time": (session_epoch + t.start_time) if session_epoch and t.start_time else t.start_time,
+            "end_time": (session_epoch + t.end_time) if session_epoch and t.end_time else t.end_time,
+            "sentence_id": t.sequence,
+        } for t in transcriptions]
+
+        recall_questions = [{
+            "question_id": q.id,
+            "question": q.question_text,
+            "source": q.source,
+            "confidence": q.confidence,
+            "answers": {
+                a.answer_type: a.content for a in q.answers
+            },
+        } for q in questions]
+
+        recall_chats = [{
+            "role": m.role,
+            "content": m.content,
+            "model_used": m.model_used,
+        } for m in chat_messages]
+
+        await self._broadcast("recall_data", {
+            "session_id": session_id,
+            "course_name": course_name,
+            "transcriptions": recall_transcriptions,
+            "questions": recall_questions,
+            "chat_messages": recall_chats,
+        })
+
+        # 更新会话状态为 active
+        async with async_session() as db:
+            from sqlalchemy import update as sql_update
+            await db.execute(
+                sql_update(Session)
+                .where(Session.id == session_id)
+                .values(status="active")
+            )
+            await db.commit()
+
+        # 继续监听：启动录音和ASR
+        self.asr_service = self._create_asr_service()
+        self.refinement_service = self._create_refinement_service()
+        self.status = "listening"
+        self.is_listening = True
+        self._recording_started_at = time.time()
+
+        hot_words = await self._get_hot_words(course_id)
+        mp3_path = await self.audio_service.start_recording(session_id)
+
+        async with async_session() as db:
+            # 获取已有录音数量以确定序号
+            result = await db.execute(
+                select(Recording).where(Recording.session_id == session_id)
+            )
+            existing_recordings = result.scalars().all()
+            seq_num = len(existing_recordings) + 1
+
+            recording = Recording(
+                session_id=session_id,
+                file_path=mp3_path,
+                sequence_number=seq_num,
+            )
+            db.add(recording)
+            await db.commit()
+            self.current_recording_id = recording.id
+
+        try:
+            await self.asr_service.start(hot_words=hot_words, language=settings.language)
+        except Exception as e:
+            logger.error("ASR 启动失败 (recall): {}", e)
+            self.is_listening = False
+            self.status = "error"
+            await self.audio_service.stop_recording()
+            await self._broadcast("error", {"message": f"ASR 启动失败: {e}"})
+            return
+
+        self._asr_feed_task = asyncio.create_task(self._feed_audio_to_asr())
+        self._asr_process_task = asyncio.create_task(self._process_asr_results())
+        self._detection_task = asyncio.create_task(self._auto_detect_loop())
+
+        # 定时停止
+        self._auto_stop_label = auto_stop_label
+        if auto_stop_seconds > 0:
+            self._auto_stop_remaining = auto_stop_seconds
+            self._auto_stop_task = asyncio.create_task(self._auto_stop_loop())
+        else:
+            self._auto_stop_remaining = 0
+            self._auto_stop_task = None
+
+        update_icon_recording(True)
+        await self._broadcast("status", {
+            "status": "listening",
+            "session_id": session_id,
+            "course_name": course_name,
+            "is_listening": True,
+            "filter_mode": settings.llm_filter_mode,
+            "auto_stop_remaining": self._auto_stop_remaining,
+        })
+        logger.info("恢复会话: session={}, course={}", session_id, course_name)
 
     # ──────────── 辅助方法 ────────────
 
