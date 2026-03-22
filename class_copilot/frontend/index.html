@@ -134,8 +134,43 @@
                         <h3>🔑 API 密钥</h3>
                         <div class="form-group">
                             <label>DashScope API Key</label>
-                            <input type="password" id="settingApiKey" placeholder="留空保持不变">
-                            <small>首次使用请配置阿里百炼 API Key</small>
+                            <input type="password" id="settingApiKey" placeholder="未配置">
+                            <small>使用阿里千问 ASR/LLM 时需要</small>
+                        </div>
+                        <div class="form-group">
+                            <label>豆包语音 AppID（可选）</label>
+                            <input type="text" id="settingDoubaoAppid" placeholder="未配置">
+                            <small>旧版控制台用户填写；新版控制台用户可留空</small>
+                        </div>
+                        <div class="form-group">
+                            <label>豆包语音 API Key</label>
+                            <input type="password" id="settingDoubaoToken" placeholder="未配置">
+                            <small>✅ 从<a href="https://console.volcengine.com/speech/new/experience/asr" target="_blank">新版控制台</a>获取：概览页 → API接入 → API Key管理</small>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>🗣️ ASR 提供商</h3>
+                        <div class="form-group">
+                            <label>实时语音识别（流式）</label>
+                            <select id="settingAsrProvider">
+                                <option value="dashscope">阿里千问 (DashScope)</option>
+                                <option value="doubao">豆包 (火山引擎)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>精修转写（非流式/离线）</label>
+                            <select id="settingRefinementProvider">
+                                <option value="dashscope">阿里千问 (DashScope)</option>
+                                <option value="doubao">豆包 (火山引擎)</option>
+                            </select>
+                        </div>
+                        <div id="doubaoSettings" style="display:none;">
+                            <div class="form-group">
+                                <label>豆包离线转写音频基础URL</label>
+                                <input type="text" id="settingDoubaoAudioBaseUrl" placeholder="http://your-server:8765/api/recordings">
+                                <small>豆包离线转写需要音频文件可通过URL下载</small>
+                            </div>
                         </div>
                     </div>
 

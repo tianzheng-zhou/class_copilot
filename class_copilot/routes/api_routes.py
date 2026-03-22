@@ -267,7 +267,12 @@ async def get_settings():
         output = {}
         for item in items:
             if item.is_encrypted:
-                output[item.key] = "***已配置***"
+                try:
+                    plain = decrypt_value(item.value)
+                    preview = plain[:4] + "****" if len(plain) > 4 else "****"
+                except Exception:
+                    preview = "****"
+                output[item.key] = preview
             else:
                 output[item.key] = item.value
         return output
@@ -299,6 +304,10 @@ async def update_settings(data: SettingUpdate):
         real_value = data.value  # 使用原始值
         settings.dashscope_api_key = real_value
         session_manager.llm_service.update_api_key(real_value)
+    elif data.key == "doubao_appid":
+        settings.doubao_appid = data.value
+    elif data.key == "doubao_access_token":
+        settings.doubao_access_token = data.value
 
     return {"status": "updated"}
 
@@ -317,6 +326,9 @@ async def get_runtime_settings():
         "refinement_interval_minutes": settings.refinement_interval_minutes,
         "llm_filter_mode": settings.llm_filter_mode,
         "asr_model": settings.asr_model,
+        "asr_provider": settings.asr_provider,
+        "refinement_provider": settings.refinement_provider,
+        "doubao_audio_base_url": settings.doubao_audio_base_url,
     }
 
 
@@ -327,6 +339,31 @@ async def update_runtime_settings(data: dict):
         if hasattr(settings, key):
             setattr(settings, key, value)
     return {"status": "updated"}
+
+
+# ──────────── 录音文件访问 (供豆包离线转写下载) ────────────
+
+@router.get("/recordings/{filename}")
+async def serve_recording(filename: str):
+    """提供录音文件下载（豆包离线 ASR 需通过 URL 访问音频文件）"""
+    from fastapi.responses import FileResponse
+    import re
+
+    # 安全校验：仅允许安全的文件名字符
+    if not re.match(r'^[\w\-\.]+$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    file_path = Path(settings.data_dir) / "recordings" / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    # 确保路径不会逃逸出 recordings 目录
+    try:
+        file_path.resolve().relative_to((Path(settings.data_dir) / "recordings").resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return FileResponse(str(file_path), media_type="audio/mpeg")
 
 
 # ──────────── 音频设备 ────────────

@@ -5,6 +5,8 @@ import asyncio
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from loguru import logger
 
 from class_copilot.config import settings
@@ -23,6 +25,18 @@ def create_app() -> FastAPI:
 
     # 注册路由
     app.include_router(ws_router)
+
+    # 禁用前端静态文件缓存（开发模式，确保浏览器始终加载最新内容）
+    class NoCacheMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            response = await call_next(request)
+            if request.url.path.startswith("/assets") or request.url.path == "/":
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+            return response
+
+    app.add_middleware(NoCacheMiddleware)
     app.include_router(api_router)
 
     @app.on_event("startup")
@@ -78,10 +92,14 @@ async def _load_saved_settings():
             result = await db.execute(select(SettingItem))
             items = result.scalars().all()
             for item in items:
-                if hasattr(settings, item.key):
+                key = item.key
+                # 兼容旧字段名
+                if key == "doubao_api_key":
+                    key = "doubao_access_token"
+                if hasattr(settings, key):
                     value = decrypt_value(item.value) if item.is_encrypted else item.value
-                    setattr(settings, item.key, value)
+                    setattr(settings, key, value)
                     label = "***" if item.is_encrypted else value
-                    logger.info("已加载设置: {} = {}", item.key, label)
+                    logger.info("已加载设置: {} = {}", key, label)
     except Exception as e:
         logger.warning("加载设置失败: {}", e)

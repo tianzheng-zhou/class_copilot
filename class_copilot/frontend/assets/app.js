@@ -733,7 +733,31 @@ async function loadSettings() {
         document.getElementById('settingRefinementStrategy').value = data.refinement_strategy;
         document.getElementById('settingRefinementInterval').value = data.refinement_interval_minutes;
 
+        // ASR 提供商
+        document.getElementById('settingAsrProvider').value = data.asr_provider || 'dashscope';
+        document.getElementById('settingRefinementProvider').value = data.refinement_provider || 'dashscope';
+        document.getElementById('settingDoubaoAudioBaseUrl').value = data.doubao_audio_base_url || '';
+
         toggleRefinementSettings();
+        toggleDoubaoSettings();
+
+        // 加载密钥配置状态
+        try {
+            const keysResp = await fetch('/api/settings');
+            const keysData = await keysResp.json();
+            const apiKeyEl = document.getElementById('settingApiKey');
+            const doubaoAppidEl = document.getElementById('settingDoubaoAppid');
+            const doubaoTokenEl = document.getElementById('settingDoubaoToken');
+            apiKeyEl.placeholder = keysData.dashscope_api_key ? `✅ 已配置 (${keysData.dashscope_api_key}) — 留空保持不变` : '未配置';
+            if (keysData.doubao_appid) {
+                doubaoAppidEl.value = keysData.doubao_appid;
+            }
+            doubaoAppidEl.placeholder = keysData.doubao_appid ? '✅ 已配置' : '未配置';
+            const doubaoKey = keysData.doubao_access_token || keysData.doubao_api_key;
+            doubaoTokenEl.placeholder = doubaoKey ? `✅ 已配置 (${doubaoKey}) — 留空保持不变` : '未配置';
+        } catch (e) {
+            console.warn('加载密钥状态失败:', e);
+        }
 
         // 加载音频设备
         const devResp = await fetch('/api/audio/devices');
@@ -755,13 +779,31 @@ async function loadSettings() {
 
 async function saveSettings() {
     try {
-        // 保存 API Key
+        // 保存 DashScope API Key
         const apiKey = document.getElementById('settingApiKey').value;
         if (apiKey) {
             await fetch('/api/settings', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key: 'dashscope_api_key', value: apiKey, is_encrypted: true }),
+            });
+        }
+
+        // 保存豆包凭据
+        const doubaoAppid = document.getElementById('settingDoubaoAppid').value;
+        if (doubaoAppid) {
+            await fetch('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: 'doubao_appid', value: doubaoAppid, is_encrypted: false }),
+            });
+        }
+        const doubaoToken = document.getElementById('settingDoubaoToken').value;
+        if (doubaoToken) {
+            await fetch('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: 'doubao_access_token', value: doubaoToken, is_encrypted: true }),
             });
         }
 
@@ -778,6 +820,9 @@ async function saveSettings() {
                 enable_refinement: document.getElementById('settingRefinement').checked,
                 refinement_strategy: document.getElementById('settingRefinementStrategy').value,
                 refinement_interval_minutes: parseInt(document.getElementById('settingRefinementInterval').value),
+                asr_provider: document.getElementById('settingAsrProvider').value,
+                refinement_provider: document.getElementById('settingRefinementProvider').value,
+                doubao_audio_base_url: document.getElementById('settingDoubaoAudioBaseUrl').value,
             }),
         });
 
@@ -788,6 +833,13 @@ async function saveSettings() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ device_index: mic ? parseInt(mic) : null }),
         });
+
+        // 更新 placeholder 状态
+        document.getElementById('settingApiKey').placeholder = document.getElementById('settingApiKey').value ? '✅ 已配置 — 留空保持不变' : document.getElementById('settingApiKey').placeholder;
+        document.getElementById('settingDoubaoToken').placeholder = document.getElementById('settingDoubaoToken').value ? '✅ 已配置 — 留空保持不变' : document.getElementById('settingDoubaoToken').placeholder;
+        // 清空密码字段（防止重复保存）
+        document.getElementById('settingApiKey').value = '';
+        document.getElementById('settingDoubaoToken').value = '';
 
         showToast('设置已保存', 'success');
         closeSettings();
@@ -801,6 +853,13 @@ function toggleRefinementSettings() {
     const enabled = document.getElementById('settingRefinement').checked;
     document.getElementById('refinementSettings').style.display = enabled ? 'block' : 'none';
     document.getElementById('btnManualRefine').style.display = enabled ? 'inline-flex' : 'none';
+}
+
+function toggleDoubaoSettings() {
+    const asrProvider = document.getElementById('settingAsrProvider').value;
+    const refProvider = document.getElementById('settingRefinementProvider').value;
+    const show = asrProvider === 'doubao' || refProvider === 'doubao';
+    document.getElementById('doubaoSettings').style.display = show ? 'block' : 'none';
 }
 
 function openSettings() {
@@ -923,6 +982,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
     document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
     document.getElementById('settingRefinement').addEventListener('change', toggleRefinementSettings);
+    document.getElementById('settingAsrProvider').addEventListener('change', toggleDoubaoSettings);
+    document.getElementById('settingRefinementProvider').addEventListener('change', toggleDoubaoSettings);
 
     // 历史返回
     document.getElementById('btnBackToList').addEventListener('click', () => {

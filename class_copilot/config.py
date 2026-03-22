@@ -31,12 +31,35 @@ class Settings(BaseSettings):
     llm_model_fast: str = Field(default="qwen-plus", description="快速LLM模型")
     llm_model_quality: str = Field(default="qwen-max", description="高质量LLM模型")
 
-    # ASR 配置
+    # ASR 提供商选择
+    asr_provider: Literal["dashscope", "doubao"] = Field(
+        default="dashscope", description="实时ASR提供商"
+    )
+    refinement_provider: Literal["dashscope", "doubao"] = Field(
+        default="dashscope", description="精修ASR提供商"
+    )
+
+    # DashScope ASR 配置
     asr_model: str = Field(
-        default="paraformer-realtime-v2", description="实时ASR模型"
+        default="paraformer-realtime-v2", description="DashScope实时ASR模型"
     )
     refined_asr_model: str = Field(
-        default="paraformer-v2", description="精修ASR模型(文件转写)"
+        default="paraformer-v2", description="DashScope精修ASR模型(文件转写)"
+    )
+
+    # 豆包(火山引擎)ASR 配置 (v3 大模型版)
+    doubao_appid: str = Field(default="", description="豆包语音 AppID")
+    doubao_access_token: str = Field(default="", description="豆包语音 Access Token")
+    doubao_resource_id_streaming: str = Field(
+        default="volc.seedasr.sauc.duration",
+        description="豆包流式识别 Resource ID (2.0小时版)",
+    )
+    doubao_resource_id_offline: str = Field(
+        default="volc.seedasr.auc",
+        description="豆包录音文件识别 Resource ID (2.0版)",
+    )
+    doubao_audio_base_url: str = Field(
+        default="", description="豆包离线转写音频文件访问基础URL"
     )
 
     # 音频配置

@@ -14,9 +14,11 @@ from class_copilot.models.models import (
 )
 from class_copilot.services.audio_service import AudioService
 from class_copilot.services.asr_service import RealtimeASRService
+from class_copilot.services.doubao_asr_service import DoubaoRealtimeASRService
 from class_copilot.services.llm_service import LLMService
 from class_copilot.services.question_detector import QuestionDetector
 from class_copilot.services.refinement_service import RefinementService
+from class_copilot.services.doubao_refinement_service import DoubaoRefinementService
 from class_copilot.services.notification_service import NotificationService
 from class_copilot.services.hotkey_service import HotkeyService
 from class_copilot.services.tray_service import update_icon_recording, set_main_loop
@@ -28,10 +30,10 @@ class SessionManager:
 
     def __init__(self):
         self.audio_service = AudioService()
-        self.asr_service = RealtimeASRService()
+        self.asr_service = self._create_asr_service()
         self.llm_service = LLMService()
         self.question_detector = QuestionDetector(self.llm_service)
-        self.refinement_service = RefinementService()
+        self.refinement_service = self._create_refinement_service()
         self.notification_service = NotificationService()
         self.hotkey_service = HotkeyService()
 
@@ -69,11 +71,29 @@ class SessionManager:
 
         logger.info("会话管理器初始化完成")
 
+    @staticmethod
+    def _create_asr_service():
+        """根据配置创建实时 ASR 服务"""
+        if settings.asr_provider == "doubao":
+            return DoubaoRealtimeASRService()
+        return RealtimeASRService()
+
+    @staticmethod
+    def _create_refinement_service():
+        """根据配置创建精修 ASR 服务"""
+        if settings.refinement_provider == "doubao":
+            return DoubaoRefinementService()
+        return RefinementService()
+
     async def start_listening(self, course_name: str = ""):
         """开始监听（录音+ASR）"""
         if self.is_listening:
             logger.warning("已在监听中")
             return
+
+        # 根据当前配置(重新)创建 ASR / 精修服务，允许用户在会话间切换提供商
+        self.asr_service = self._create_asr_service()
+        self.refinement_service = self._create_refinement_service()
 
         self.current_course_name = course_name
         self.status = "listening"
@@ -112,7 +132,16 @@ class SessionManager:
             self.current_recording_id = recording.id
 
         # 启动ASR
-        await self.asr_service.start(hot_words=hot_words, language=settings.language)
+        try:
+            await self.asr_service.start(hot_words=hot_words, language=settings.language)
+        except Exception as e:
+            logger.error("ASR 启动失败: {}", e)
+            self.is_listening = False
+            self.status = "error"
+            await self.audio_service.stop_recording()
+            await self._broadcast("error", {"message": f"ASR 启动失败: {e}"})
+            await self._broadcast("status", {"status": "error", "session_id": self.current_session_id})
+            return
 
         # 启动后台任务
         self._asr_feed_task = asyncio.create_task(self._feed_audio_to_asr())
