@@ -59,10 +59,6 @@ class Settings(BaseSettings):
         default="volc.seedasr.auc",
         description="豆包录音文件识别 Resource ID (2.0版)",
     )
-    doubao_audio_base_url: str = Field(
-        default="", description="豆包离线转写音频文件访问基础URL"
-    )
-
     # 阿里云 OSS（用于上传音频获取公网可访问URL）
     oss_access_key_id: str = Field(default="", description="阿里云 OSS Access Key ID")
     oss_access_key_secret: str = Field(default="", description="阿里云 OSS Access Key Secret")

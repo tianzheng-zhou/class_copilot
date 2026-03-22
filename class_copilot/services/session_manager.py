@@ -1,6 +1,7 @@
 """会话管理器 - 协调所有服务的中枢"""
 
 import asyncio
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -55,6 +56,9 @@ class SessionManager:
         # 转写序号
         self._transcription_seq = 0
 
+        # 录音开始时的 epoch 时间（用于将相对时间转为绝对时间）
+        self._recording_started_at: float = 0
+
     async def initialize(self):
         """初始化服务"""
         loop = asyncio.get_event_loop()
@@ -99,6 +103,7 @@ class SessionManager:
         self.status = "listening"
         self.is_listening = True
         self._transcription_seq = 0
+        self._recording_started_at = time.time()
 
         # 获取或创建课程
         course_id = await self._get_or_create_course(course_name)
@@ -193,7 +198,7 @@ class SessionManager:
                 await db.commit()
 
         update_icon_recording(False)
-        await self._broadcast("status", {"status": "stopped"})
+        await self._broadcast("status", {"status": "stopped", "session_id": self.current_session_id})
         logger.info("停止监听: session={}", self.current_session_id)
 
         # 课后精修
@@ -352,14 +357,18 @@ class SessionManager:
                 "speaker_label": speaker_label,
             })
 
-        # 广播到前端
+        # 广播到前端（将相对时间转为绝对 epoch 时间）
+        rel_start = result.get("start_time", 0)
+        rel_end = result.get("end_time", 0)
+        abs_start = (self._recording_started_at + rel_start) if self._recording_started_at and rel_start else 0
+        abs_end = (self._recording_started_at + rel_end) if self._recording_started_at and rel_end else 0
         await self._broadcast("transcription", {
             "text": text,
             "is_final": is_final,
             "speaker_label": speaker_label,
             "is_teacher": is_teacher,
-            "start_time": result.get("start_time", 0),
-            "end_time": result.get("end_time", 0),
+            "start_time": abs_start,
+            "end_time": abs_end,
             "sentence_id": result.get("sentence_id", 0),
         })
 
@@ -642,20 +651,48 @@ class SessionManager:
                 await db.commit()
                 return
 
-            # 按时间重叠将精修片段映射到原始记录
-            for orig in originals:
-                matching_texts = []
-                for seg in refined_segments:
-                    # 计算时间重叠
+            # 贪心 1:1 匹配：每个精修片段只分配给重叠最大的一个原始记录
+            # 构建所有 (overlap, seg_idx, orig) 候选对
+            matches = []
+            for seg_idx, seg in enumerate(refined_segments):
+                for orig in originals:
                     overlap_start = max(seg["start_time"], orig.start_time)
                     overlap_end = min(seg["end_time"], orig.end_time)
-                    if overlap_end > overlap_start:
-                        matching_texts.append(seg["text"])
+                    overlap = max(0, overlap_end - overlap_start)
+                    if overlap > 0:
+                        matches.append((overlap, seg_idx, orig))
 
-                if matching_texts:
-                    orig.refined_text = "".join(matching_texts)
-                    orig.refinement_status = "refined"
-                    orig.refined_at = datetime.utcnow()
+            # 按重叠量降序，贪心分配
+            matches.sort(key=lambda x: x[0], reverse=True)
+            used_seg_idxs: set[int] = set()
+            used_orig_ids: set[str] = set()
+
+            for overlap, seg_idx, orig in matches:
+                if seg_idx in used_seg_idxs or orig.id in used_orig_ids:
+                    continue
+                orig.refined_text = refined_segments[seg_idx]["text"]
+                orig.refinement_status = "refined"
+                orig.refined_at = datetime.utcnow()
+                used_seg_idxs.add(seg_idx)
+                used_orig_ids.add(orig.id)
+
+            # 未匹配到原始记录的精修片段 → 创建新记录
+            max_seq = max(o.sequence for o in originals) if originals else 0
+            for seg_idx, seg in enumerate(refined_segments):
+                if seg_idx not in used_seg_idxs:
+                    max_seq += 1
+                    trans = Transcription(
+                        session_id=session_id,
+                        start_time=seg["start_time"],
+                        end_time=seg["end_time"],
+                        sequence=max_seq,
+                        realtime_text="",
+                        refined_text=seg["text"],
+                        is_final=True,
+                        refinement_status="refined",
+                        refined_at=datetime.utcnow(),
+                    )
+                    db.add(trans)
 
             await db.commit()
 

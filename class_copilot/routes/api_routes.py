@@ -1,6 +1,7 @@
 """REST API 路由 - 历史查询、设置、导出等"""
 
 import asyncio
+import calendar
 from datetime import datetime
 from pathlib import Path
 
@@ -136,6 +137,9 @@ async def get_session_detail(session_id: str):
         )
         chat_messages = chat_result.scalars().all()
 
+        # 将相对时间转为绝对 epoch 时间
+        session_epoch = calendar.timegm(session.started_at.timetuple()) if session.started_at else 0
+
         return {
             "session": {
                 "id": session.id,
@@ -155,8 +159,8 @@ async def get_session_detail(session_id: str):
                 "speaker_label": t.speaker_label,
                 "is_teacher": t.is_teacher,
                 "refinement_status": t.refinement_status,
-                "start_time": t.start_time,
-                "end_time": t.end_time,
+                "start_time": (session_epoch + t.start_time) if session_epoch and t.start_time else t.start_time,
+                "end_time": (session_epoch + t.end_time) if session_epoch and t.end_time else t.end_time,
             } for t in transcriptions],
             "questions": [{
                 "id": q.id,
@@ -333,7 +337,6 @@ async def get_runtime_settings():
         "asr_model": settings.asr_model,
         "asr_provider": settings.asr_provider,
         "refinement_provider": settings.refinement_provider,
-        "doubao_audio_base_url": settings.doubao_audio_base_url,
         "auto_answer_model": settings.auto_answer_model,
         "llm_model_fast": settings.llm_model_fast,
         "llm_model_quality": settings.llm_model_quality,

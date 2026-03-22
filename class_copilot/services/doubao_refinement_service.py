@@ -8,8 +8,7 @@ API 流程:
 
 鉴权: HTTP Header (X-Api-App-Key / X-Api-Access-Key / X-Api-Resource-Id)
 
-注意: 该服务需要音频文件可通过 URL 下载。本地录音需通过本应用提供的
-/api/recordings/<filename> 端点访问, 并配置 doubao_audio_base_url。
+注意: 该服务需要音频文件可通过 URL 下载，需配置 OSS 上传后获取公网 URL。
 """
 
 import asyncio
@@ -68,11 +67,8 @@ class DoubaoRefinementService:
                 refinement_logger.error("OSS 上传失败，尝试回退到本地 URL")
 
         if not audio_url:
-            audio_base = settings.doubao_audio_base_url
-            if not audio_base:
-                refinement_logger.error("豆包离线 ASR 需配置 OSS 或 doubao_audio_base_url")
-                return None
-            audio_url = f"{audio_base.rstrip('/')}/{file_path.name}"
+            refinement_logger.error("豆包离线 ASR 需配置 OSS 以上传音频获取公网 URL")
+            return None
 
         ext = file_path.suffix.lower().lstrip(".")
         fmt_map = {"mp3": "mp3", "wav": "wav", "ogg": "ogg", "mp4": "mp4"}

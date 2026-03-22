@@ -7,6 +7,7 @@ const state = {
     ws: null,
     isListening: false,
     sessionId: null,
+    sessionIds: [],  // 所有会话ID（用于精修结果累积显示）
     courseName: '',
     filterMode: 'all',
     questions: [],  // {id, question, source, answers: {brief: '', detailed: ''}, showDetailed: false}
@@ -157,6 +158,11 @@ function handleStatus(data) {
     state.sessionId = data.session_id;
     state.filterMode = data.filter_mode || 'teacher_only';
 
+    // 跟踪所有会话ID，用于精修结果累积显示
+    if (data.session_id && !state.sessionIds.includes(data.session_id)) {
+        state.sessionIds.push(data.session_id);
+    }
+
     updateListenButton();
     updateStatusText(data.status);
     updateFilterBadge();
@@ -286,7 +292,13 @@ function createTransSegment(speakerLabel, isTeacher, text, isInterim, startTime,
 function formatTimestamp(startTime, endTime) {
     if (startTime == null && endTime == null) return '';
     const fmt = (t) => {
-        if (t == null || t <= 0) return '--:--';
+        if (t == null || t <= 0) return '--:--:--';
+        // epoch 秒（绝对时间）：值大于 1e9 (约 2001 年)
+        if (t > 1e9) {
+            const d = new Date(t * 1000);
+            return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+        }
+        // 回退：相对时间 MM:SS
         const totalSec = Math.floor(t);
         const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
         const sec = String(totalSec % 60).padStart(2, '0');
@@ -499,12 +511,52 @@ function handleRefinementStatus(data) {
         el.style.display = 'inline';
         el.textContent = '精修完成 ✓';
         setTimeout(() => { el.style.display = 'none'; }, 5000);
-        // 精修完成 → 加载精修结果
-        if (data.session_id || state.sessionId) {
-            loadRefinedTranscriptions(data.session_id || state.sessionId);
-        }
+        // 精修完成 → 加载所有会话的精修结果（避免覆盖之前的精修记录）
+        loadAllRefinedTranscriptions();
     } else {
         el.style.display = 'none';
+    }
+}
+
+async function loadAllRefinedTranscriptions() {
+    const area = document.getElementById('refinedTranscriptionArea');
+    if (!area) return;
+
+    const allSessionIds = state.sessionIds.length > 0
+        ? state.sessionIds
+        : (state.sessionId ? [state.sessionId] : []);
+    if (allSessionIds.length === 0) return;
+
+    area.innerHTML = '<div class="refined-loading">加载精修结果...</div>';
+
+    try {
+        let hasAnyRefined = false;
+        area.innerHTML = '';
+
+        for (const sid of allSessionIds) {
+            const resp = await fetch(`/api/sessions/${sid}`);
+            const detail = await resp.json();
+            const transcriptions = detail.transcriptions || [];
+            const refined = transcriptions.filter(t => t.refined_text);
+
+            if (refined.length > 0) {
+                hasAnyRefined = true;
+                refined.forEach(t => {
+                    const el = createTransSegment(
+                        t.speaker_label, t.is_teacher, t.refined_text, false,
+                        t.start_time, t.end_time
+                    );
+                    area.appendChild(el);
+                });
+            }
+        }
+
+        if (!hasAnyRefined) {
+            area.innerHTML = '<div class="empty-hint">暂无精修结果</div>';
+        }
+    } catch (e) {
+        console.error('加载精修结果失败:', e);
+        area.innerHTML = '<div class="empty-hint">加载精修结果失败</div>';
     }
 }
 
@@ -743,7 +795,6 @@ async function loadSettings() {
         // ASR 提供商
         document.getElementById('settingAsrProvider').value = data.asr_provider || 'dashscope';
         document.getElementById('settingRefinementProvider').value = data.refinement_provider || 'dashscope';
-        document.getElementById('settingDoubaoAudioBaseUrl').value = data.doubao_audio_base_url || '';
         document.getElementById('settingAutoAnswerModel').value = data.auto_answer_model || 'qwen3.5-flash';
 
         // 更新自动回答模型选择器的选项
@@ -770,7 +821,6 @@ async function loadSettings() {
         `;
 
         toggleRefinementSettings();
-        toggleDoubaoSettings();
 
         // 加载密钥配置状态
         try {
@@ -877,7 +927,6 @@ async function saveSettings() {
                 refinement_interval_minutes: parseInt(document.getElementById('settingRefinementInterval').value),
                 asr_provider: document.getElementById('settingAsrProvider').value,
                 refinement_provider: document.getElementById('settingRefinementProvider').value,
-                doubao_audio_base_url: document.getElementById('settingDoubaoAudioBaseUrl').value,
                 auto_answer_model: document.getElementById('settingAutoAnswerModel').value,
                 oss_bucket_name: document.getElementById('settingOssBucket').value,
                 oss_endpoint: document.getElementById('settingOssEndpoint').value,
@@ -915,13 +964,6 @@ function toggleRefinementSettings() {
     const enabled = document.getElementById('settingRefinement').checked;
     document.getElementById('refinementSettings').style.display = enabled ? 'block' : 'none';
     document.getElementById('btnManualRefine').style.display = enabled ? 'inline-flex' : 'none';
-}
-
-function toggleDoubaoSettings() {
-    const asrProvider = document.getElementById('settingAsrProvider').value;
-    const refProvider = document.getElementById('settingRefinementProvider').value;
-    const show = asrProvider === 'doubao' || refProvider === 'doubao';
-    document.getElementById('doubaoSettings').style.display = show ? 'block' : 'none';
 }
 
 function openSettings() {
@@ -1044,8 +1086,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
     document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
     document.getElementById('settingRefinement').addEventListener('change', toggleRefinementSettings);
-    document.getElementById('settingAsrProvider').addEventListener('change', toggleDoubaoSettings);
-    document.getElementById('settingRefinementProvider').addEventListener('change', toggleDoubaoSettings);
+
 
     // OSS 测试连接
     document.getElementById('btnTestOss').addEventListener('click', async () => {
