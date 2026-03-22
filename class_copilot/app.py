@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     async def startup():
         logger.info("应用启动中...")
         await init_db()
+        await _fix_stale_sessions()
         await _load_saved_settings()
         await session_manager.initialize()
 
@@ -79,6 +80,26 @@ def create_app() -> FastAPI:
             return FileResponse(os.path.join(frontend_dir, "index.html"))
 
     return app
+
+
+async def _fix_stale_sessions():
+    """启动时将所有残留的 active 会话标记为 interrupted"""
+    from sqlalchemy import update as sql_update
+    from class_copilot.models.models import Session
+    from datetime import datetime
+
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                sql_update(Session)
+                .where(Session.status == "active")
+                .values(status="interrupted", ended_at=datetime.utcnow())
+            )
+            await db.commit()
+            if result.rowcount:
+                logger.info("已修复 {} 个残留的活跃会话", result.rowcount)
+    except Exception as e:
+        logger.warning("修复残留会话失败: {}", e)
 
 
 async def _load_saved_settings():

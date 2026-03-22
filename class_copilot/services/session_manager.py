@@ -144,6 +144,18 @@ class SessionManager:
             self.is_listening = False
             self.status = "error"
             await self.audio_service.stop_recording()
+            # 更新数据库中的会话状态
+            try:
+                async with async_session() as db:
+                    from sqlalchemy import update as sql_update
+                    await db.execute(
+                        sql_update(Session)
+                        .where(Session.id == self.current_session_id)
+                        .values(status="interrupted", ended_at=datetime.utcnow())
+                    )
+                    await db.commit()
+            except Exception as db_err:
+                logger.error("更新会话状态失败: {}", db_err)
             await self._broadcast("error", {"message": f"ASR 启动失败: {e}"})
             await self._broadcast("status", {"status": "error", "session_id": self.current_session_id})
             return
@@ -176,26 +188,31 @@ class SessionManager:
         # 停止录音
         recording_info = await self.audio_service.stop_recording()
 
-        # 更新录音信息
-        if recording_info and self.current_recording_id:
+        # 更新数据库状态
+        try:
             async with async_session() as db:
                 from sqlalchemy import update as sql_update
-                await db.execute(
-                    sql_update(Recording)
-                    .where(Recording.id == self.current_recording_id)
-                    .values(
-                        duration_seconds=recording_info["duration_seconds"],
-                        file_size_bytes=recording_info["file_size_bytes"],
-                        ended_at=datetime.utcnow(),
+                # 更新录音信息（仅在录音成功时）
+                if recording_info and self.current_recording_id:
+                    await db.execute(
+                        sql_update(Recording)
+                        .where(Recording.id == self.current_recording_id)
+                        .values(
+                            duration_seconds=recording_info["duration_seconds"],
+                            file_size_bytes=recording_info["file_size_bytes"],
+                            ended_at=datetime.utcnow(),
+                        )
                     )
-                )
-                # 更新会话状态
-                await db.execute(
-                    sql_update(Session)
-                    .where(Session.id == self.current_session_id)
-                    .values(status="stopped", ended_at=datetime.utcnow())
-                )
+                # 始终更新会话状态
+                if self.current_session_id:
+                    await db.execute(
+                        sql_update(Session)
+                        .where(Session.id == self.current_session_id)
+                        .values(status="stopped", ended_at=datetime.utcnow())
+                    )
                 await db.commit()
+        except Exception as e:
+            logger.error("更新会话状态失败: {}", e)
 
         update_icon_recording(False)
         await self._broadcast("status", {"status": "stopped", "session_id": self.current_session_id})

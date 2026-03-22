@@ -131,15 +131,17 @@
                 </div>
                 <!-- 标签页导航 -->
                 <div class="settings-tabs">
-                    <button class="settings-tab active" data-settings-tab="keys">🔑 密钥</button>
-                    <button class="settings-tab" data-settings-tab="asr">🗣️ 语音</button>                    <button class="settings-tab" data-settings-tab="oss">☁️ OSS</button>                    <button class="settings-tab" data-settings-tab="audio">🎤 音频</button>
-                    <button class="settings-tab" data-settings-tab="language">🌐 语言</button>
+                    <button class="settings-tab active" data-settings-tab="language">🌐 语言</button>
+                    <button class="settings-tab" data-settings-tab="asr">🗣️ 语音</button>
+                    <button class="settings-tab" data-settings-tab="audio">🎤 音频</button>
                     <button class="settings-tab" data-settings-tab="answer">💡 答案</button>
                     <button class="settings-tab" data-settings-tab="refinement">🔄 精修</button>
+                    <button class="settings-tab" data-settings-tab="oss">☁️ OSS</button>
+                    <button class="settings-tab" data-settings-tab="keys">🔑 密钥</button>
                 </div>
                 <div class="modal-body">
                     <!-- 密钥 -->
-                    <div class="settings-pane active" data-settings-pane="keys">
+                    <div class="settings-pane" data-settings-pane="keys">
                         <div class="form-group">
                             <label>DashScope API Key</label>
                             <input type="password" id="settingApiKey" placeholder="未配置">
@@ -223,7 +225,7 @@
                     </div>
 
                     <!-- 语言 -->
-                    <div class="settings-pane" data-settings-pane="language">
+                    <div class="settings-pane active" data-settings-pane="language">
                         <div class="form-group">
                             <label>授课语言</label>
                             <select id="settingLanguage">
