@@ -2,11 +2,13 @@
 
 import asyncio
 import calendar
+import io
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,16 +83,22 @@ async def update_course(course_id: str, data: CourseCreate):
 # ──────────── 历史会话 ────────────
 
 @router.get("/sessions")
-async def list_sessions():
+async def list_sessions(date_from: str | None = None, date_to: str | None = None):
     async with async_session() as db:
-        result = await db.execute(
+        query = (
             select(Session)
             .options(selectinload(Session.course))
             .order_by(Session.started_at.desc())
         )
+        if date_from:
+            query = query.where(Session.date >= date_from)
+        if date_to:
+            query = query.where(Session.date <= date_to)
+        result = await db.execute(query)
         sessions = result.scalars().all()
         return [{
             "id": s.id,
+            "custom_name": s.custom_name,
             "course_name": s.course.name if s.course else "",
             "date": s.date,
             "started_at": s.started_at.isoformat() if s.started_at else None,
@@ -185,6 +193,28 @@ async def get_session_detail(session_id: str):
         }
 
 
+@router.put("/sessions/{session_id}/rename")
+async def rename_session(session_id: str, data: dict):
+    """重命名会话"""
+    new_name = data.get("name", "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="名称不能为空")
+    if len(new_name) > 200:
+        raise HTTPException(status_code=400, detail="名称过长（最多200字）")
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Session).where(Session.id == session_id)
+        )
+        session = result.scalar_one_or_none()
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        session.custom_name = new_name
+        await db.commit()
+
+    return {"status": "renamed", "custom_name": new_name}
+
+
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     async with async_session() as db:
@@ -259,6 +289,66 @@ async def export_session(session_id: str):
         content=content,
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename=class_{session_info['date']}.md"},
+    )
+
+
+@router.get("/sessions/{session_id}/export/audio")
+async def export_session_audio(session_id: str):
+    """导出会话录音为 MP3（多段录音打包为 ZIP）"""
+    async with async_session() as db:
+        # 获取会话信息
+        result = await db.execute(
+            select(Session).options(selectinload(Session.course)).where(Session.id == session_id)
+        )
+        session = result.scalar_one_or_none()
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+
+        # 获取关联的录音文件
+        rec_result = await db.execute(
+            select(Recording)
+            .where(Recording.session_id == session_id)
+            .order_by(Recording.sequence_number)
+        )
+        recordings = rec_result.scalars().all()
+
+    if not recordings:
+        raise HTTPException(status_code=404, detail="该会话没有录音文件")
+
+    course_name = session.course.name if session.course else "unknown"
+    date_str = session.date or "unknown"
+    base_name = f"class_{date_str}_{course_name}"
+
+    # 筛选出实际存在的文件
+    existing = []
+    for r in recordings:
+        p = Path(r.file_path)
+        if p.exists() and p.is_file():
+            existing.append(p)
+
+    if not existing:
+        raise HTTPException(status_code=404, detail="录音文件不存在（可能已被删除）")
+
+    if len(existing) == 1:
+        # 单个录音，直接返回 MP3
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            str(existing[0]),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": f"attachment; filename={base_name}.mp3"},
+        )
+
+    # 多段录音，打包为 ZIP
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for i, fp in enumerate(existing, 1):
+            zf.write(fp, f"{base_name}_part{i}.mp3")
+    buf.seek(0)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={base_name}.zip"},
     )
 
 

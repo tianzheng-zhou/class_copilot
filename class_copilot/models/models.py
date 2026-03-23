@@ -39,6 +39,7 @@ class Session(Base):
 
     id = Column(String(36), primary_key=True, default=gen_uuid)
     course_id = Column(String(36), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
+    custom_name = Column(String(200), nullable=True)  # 用户自定义会话名称
     date = Column(String(10), nullable=False)  # YYYY-MM-DD
     started_at = Column(DateTime, default=datetime.utcnow)
     ended_at = Column(DateTime, nullable=True)

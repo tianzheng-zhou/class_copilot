@@ -127,6 +127,22 @@ body {
     animation: pulse 2s infinite;
 }
 
+.btn-new-recording {
+    padding: 6px 14px;
+    font-size: 13px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all .2s;
+}
+.btn-new-recording:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.7; }
@@ -641,6 +657,27 @@ body {
 }
 
 /* ──────────── History ──────────── */
+.history-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+.history-filter-bar input[type="date"] {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    padding: 4px 8px;
+    font-size: 13px;
+}
+.history-filter-bar span {
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
 .history-list {
     flex: 1;
     overflow-y: auto;
@@ -691,6 +728,35 @@ body {
 .history-item-actions {
     display: flex;
     gap: 6px;
+}
+
+/* Export dropdown menu */
+.export-dropdown {
+    position: relative;
+    display: inline-block;
+}
+.export-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 100;
+    min-width: 140px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.15);
+    padding: 4px 0;
+    margin-top: 2px;
+}
+.export-menu-item {
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: nowrap;
+    transition: background .15s;
+}
+.export-menu-item:hover {
+    background: var(--bg-hover, rgba(255,255,255,.08));
 }
 
 .history-detail {

@@ -751,6 +751,53 @@ function recallSession(sessionId) {
     sendMessage('recall_session', { session_id: sessionId, auto_stop_seconds: seconds, auto_stop_label: label });
 }
 
+function newRecording() {
+    if (state.isListening) {
+        // 先停止当前会话
+        sendMessage('stop_listening');
+        // 等待状态更新后再清空（通过 ws onmessage 触发 handleStatus）
+        // 利用一次性监听：等到 status 变为 stopped 后清空 UI
+        const onStopped = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'status' && msg.data.status !== 'listening') {
+                state.ws.removeEventListener('message', onStopped);
+                resetUIForNewRecording();
+            }
+        };
+        state.ws.addEventListener('message', onStopped);
+    } else {
+        resetUIForNewRecording();
+    }
+}
+
+function resetUIForNewRecording() {
+    // 清空转写区
+    document.getElementById('transcriptionArea').innerHTML =
+        '<div class="empty-hint">点击"开始监听"开始课堂转写...</div>';
+    document.getElementById('refinedTranscriptionArea').innerHTML =
+        '<div class="empty-hint">暂无精修内容</div>';
+
+    // 清空回答区
+    state.questions = [];
+    renderAnswers();
+
+    // 清空聊天区
+    document.getElementById('chatArea').innerHTML = '';
+
+    // 重置状态
+    state.sessionId = null;
+    state.sessionIds = [];
+    state.interimSegments = {};
+
+    // 清空课程输入
+    document.getElementById('courseInput').value = '';
+
+    // 切换到转写标签页
+    switchTab('transcription');
+
+    showToast('已准备好新录音', 'success');
+}
+
 // ──────────── 转写子标签页 ────────────
 function switchSubTab(subtabName) {
     const panel = document.getElementById('tab-transcription');
@@ -782,12 +829,28 @@ function switchHistoryTransTab(btn, panelName) {
 // ──────────── 历史记录 ────────────
 async function loadHistory() {
     try {
-        const resp = await fetch('/api/sessions');
+        const params = new URLSearchParams();
+        const dateFrom = document.getElementById('historyDateFrom')?.value;
+        const dateTo = document.getElementById('historyDateTo')?.value;
+        if (dateFrom) params.set('date_from', dateFrom);
+        if (dateTo) params.set('date_to', dateTo);
+        const qs = params.toString();
+        const resp = await fetch('/api/sessions' + (qs ? '?' + qs : ''));
         const sessions = await resp.json();
         renderHistoryList(sessions);
     } catch (e) {
         console.error('加载历史失败:', e);
     }
+}
+
+function applyHistoryFilter() {
+    loadHistory();
+}
+
+function clearHistoryFilter() {
+    document.getElementById('historyDateFrom').value = '';
+    document.getElementById('historyDateTo').value = '';
+    loadHistory();
 }
 
 function renderHistoryList(sessions) {
@@ -815,19 +878,27 @@ function renderHistoryList(sessions) {
             : '';
 
         const startTime = s.started_at ? new Date(s.started_at).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) : '';
+        const displayName = s.custom_name || s.course_name;
 
         return `
             <div class="history-item" onclick="viewSession('${s.id}')">
                 <div class="history-item-info">
                     <div class="history-item-date">${escapeHtml(s.date)}${startTime ? ' ' + startTime : ''}</div>
-                    <div class="history-item-course">${escapeHtml(s.course_name)}</div>
+                    <div class="history-item-course">${escapeHtml(displayName)}${s.custom_name ? ` <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(s.course_name)})</span>` : ''}</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <span class="history-item-status">${statusBadge}</span>
                     ${refineBadge}
                     <div class="history-item-actions">
                         ${recallBtn}
-                        <button class="btn btn-small" onclick="event.stopPropagation();exportSession('${s.id}')">📥 导出</button>
+                        <button class="btn btn-small" onclick="event.stopPropagation();renameSession('${s.id}','${escapeHtml(displayName).replace(/'/g, "\\'")}')" title="重命名">✏️</button>
+                        <div class="export-dropdown" style="position:relative;display:inline-block;">
+                            <button class="btn btn-small" onclick="event.stopPropagation();toggleExportMenu(this)">📥 导出 ▾</button>
+                            <div class="export-menu" style="display:none;">
+                                <div class="export-menu-item" onclick="event.stopPropagation();exportSession('${s.id}')">📝 Markdown</div>
+                                <div class="export-menu-item" onclick="event.stopPropagation();exportSessionAudio('${s.id}')">🎵 音频 MP3</div>
+                            </div>
+                        </div>
                         <button class="btn btn-small" onclick="event.stopPropagation();deleteSession('${s.id}')">🗑️</button>
                     </div>
                 </div>
@@ -926,7 +997,48 @@ async function viewSession(sessionId) {
 }
 
 async function exportSession(sessionId) {
+    closeAllExportMenus();
     window.open(`/api/sessions/${sessionId}/export`, '_blank');
+}
+
+async function exportSessionAudio(sessionId) {
+    closeAllExportMenus();
+    window.open(`/api/sessions/${sessionId}/export/audio`, '_blank');
+}
+
+function toggleExportMenu(btn) {
+    const menu = btn.nextElementSibling;
+    const isOpen = menu.style.display !== 'none';
+    closeAllExportMenus();
+    if (!isOpen) menu.style.display = 'block';
+}
+
+function closeAllExportMenus() {
+    document.querySelectorAll('.export-menu').forEach(m => m.style.display = 'none');
+}
+
+// 全局点击关闭导出菜单
+document.addEventListener('click', () => closeAllExportMenus());
+
+async function renameSession(sessionId, currentName) {
+    const newName = prompt('请输入新名称：', currentName);
+    if (newName === null || newName.trim() === '') return;
+    try {
+        const resp = await fetch(`/api/sessions/${sessionId}/rename`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName.trim() }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            showToast(err.detail || '重命名失败', 'error');
+            return;
+        }
+        showToast('已重命名', 'success');
+        loadHistory();
+    } catch (e) {
+        showToast('重命名失败', 'error');
+    }
 }
 
 async function deleteSession(sessionId) {
@@ -1195,6 +1307,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast(`已设置定时停止：${label}（${formatCountdown(seconds)}后）`, 'success');
             }
         }
+    });
+
+    // 新建录音按钮
+    document.getElementById('btnNewRecording').addEventListener('click', () => {
+        newRecording();
     });
 
     // 清除定时停止

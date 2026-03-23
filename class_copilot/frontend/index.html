@@ -34,6 +34,7 @@
                     <span class="btn-icon">🎤</span>
                     <span class="btn-text">开始监听</span>
                 </button>
+                <button id="btnNewRecording" class="btn btn-small btn-new-recording" title="结束当前会话并新建录音">📁 新建</button>
             </div>
             <div class="navbar-right">
                 <span id="statusIndicator" class="status-indicator status-ready">● 就绪</span>
@@ -111,6 +112,13 @@
 
             <!-- 历史面板 -->
             <div id="tab-history" class="panel">
+                <div class="history-filter-bar">
+                    <input type="date" id="historyDateFrom" title="起始日期">
+                    <span>至</span>
+                    <input type="date" id="historyDateTo" title="截止日期">
+                    <button class="btn btn-small" onclick="applyHistoryFilter()">🔍 筛选</button>
+                    <button class="btn btn-small" onclick="clearHistoryFilter()">✕ 清除</button>
+                </div>
                 <div id="historyList" class="history-list">
                     <div class="empty-hint">加载中...</div>
                 </div>

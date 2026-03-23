@@ -36,6 +36,14 @@ async def init_db():
 
         await conn.run_sync(Base.metadata.create_all)
 
+        # 轻量级迁移：为已有表补充新列
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE sessions ADD COLUMN custom_name VARCHAR(200)"
+            )
+        except Exception:
+            pass  # 列已存在则忽略
+
 
 async def get_db() -> AsyncSession:
     """获取数据库会话"""
