@@ -529,8 +529,15 @@ function handleRefinementStatus(data) {
         el.style.display = 'inline';
         el.textContent = '精修完成 ✓';
         setTimeout(() => { el.style.display = 'none'; }, 5000);
-        // 精修完成 → 加载所有会话的精修结果（避免覆盖之前的精修记录）
-        loadAllRefinedTranscriptions();
+        // 精修完成 → 短暂延迟后加载，确保数据库写入已完全可见
+        setTimeout(() => loadAllRefinedTranscriptions(), 300);
+    } else if (data.status === 'failed') {
+        el.style.display = 'inline';
+        el.textContent = '精修失败 ✗';
+        el.style.color = '#e74c3c';
+        setTimeout(() => { el.style.display = 'none'; el.style.color = ''; }, 8000);
+        const msg = data.message || '精修过程中发生错误';
+        showToast(`精修失败: ${msg}`, 'error');
     } else {
         el.style.display = 'none';
     }

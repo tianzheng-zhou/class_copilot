@@ -89,11 +89,16 @@ class DoubaoRefinementService:
         else:
             headers["x-api-key"] = token
 
+        # 语言映射: 豆包 v3 bigmodel 使用 BCP-47 格式
+        lang_map = {"zh": "zh-CN", "en": "en-US"}
+        doubao_lang = lang_map.get(language, "zh-CN")
+
         # v3 请求体 (无 app 段)
         submit_body = {
             "audio": {
                 "format": fmt_map.get(ext, "mp3"),
                 "url": audio_url,
+                "language": doubao_lang,
             },
             "request": {
                 "model_name": "bigmodel",

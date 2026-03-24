@@ -73,7 +73,6 @@ class LLMService:
                 ],
                 temperature=0.1,
                 max_tokens=200,
-                response_format={"type": "json_object"},
                 extra_body={"enable_thinking": False},
             )
 

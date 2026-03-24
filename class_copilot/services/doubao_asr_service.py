@@ -149,6 +149,10 @@ class DoubaoRealtimeASRService:
             asr_logger.error("豆包 ASR WebSocket 握手被拒: HTTP {}, body={}", e.response.status_code, body)
             raise ConnectionError(f"豆包 ASR 连接被拒: HTTP {e.response.status_code}, {body}") from e
 
+        # 语言映射: 豆包 v3 bigmodel 使用 BCP-47 格式
+        lang_map = {"zh": "zh-CN", "en": "en-US"}
+        doubao_lang = lang_map.get(language, "zh-CN")
+
         # 构建 v3 full client request (无 app 段)
         req_payload = {
             "user": {"uid": "class_copilot_user"},
@@ -157,6 +161,7 @@ class DoubaoRealtimeASRService:
                 "rate": settings.sample_rate,
                 "bits": 16,
                 "channel": settings.channels,
+                "language": doubao_lang,
             },
             "request": {
                 "model_name": "bigmodel",

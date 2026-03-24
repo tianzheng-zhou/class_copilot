@@ -601,59 +601,90 @@ class SessionManager:
         refinement_logger.info("开始课后精修: {}", session_id)
         await self._broadcast("refinement_status", {"status": "in_progress", "progress": 0, "session_id": session_id})
 
-        async with async_session() as db:
-            result = await db.execute(
-                select(Recording).where(Recording.session_id == session_id)
-            )
-            recordings = result.scalars().all()
+        saved_count = 0  # 跟踪成功保存的精修结果数
 
-        paths = [r.file_path for r in recordings if Path(r.file_path).exists()]
-        if not paths:
-            refinement_logger.warning("无可用录音文件")
+        try:
+            async with async_session() as db:
+                result = await db.execute(
+                    select(Recording).where(Recording.session_id == session_id)
+                )
+                recordings = result.scalars().all()
+
+            paths = [r.file_path for r in recordings if Path(r.file_path).exists()]
+            if not paths:
+                refinement_logger.warning("无可用录音文件")
+                await self._broadcast("refinement_status", {"status": "failed", "session_id": session_id, "message": "无可用录音文件"})
+                return
+
+            hot_words = ""
+            async with async_session() as db:
+                result = await db.execute(
+                    select(Session).where(Session.id == session_id)
+                )
+                session = result.scalar_one_or_none()
+                if session:
+                    result2 = await db.execute(
+                        select(Course).where(Course.id == session.course_id)
+                    )
+                    course = result2.scalar_one_or_none()
+                    if course:
+                        hot_words = course.hot_words or ""
+
+            async def progress_callback(sid, progress, result, path):
+                nonlocal saved_count
+                # 保存精修结果到数据库
+                if result:
+                    try:
+                        await self._save_refined_results(sid, result)
+                        saved_count += len(result)
+                    except Exception as e:
+                        refinement_logger.error("保存精修结果失败 ({}): {}", path, e, exc_info=True)
+                else:
+                    refinement_logger.warning("录音文件精修无结果: {}", path)
+                await self._broadcast("refinement_status", {
+                    "status": "in_progress",
+                    "progress": progress,
+                    "session_id": sid,
+                })
+
+            await self.refinement_service.start_post_session_refinement(
+                session_id=session_id,
+                recording_paths=paths,
+                hot_words=hot_words,
+                language=settings.language,
+                progress_callback=progress_callback,
+            )
+
+        except Exception as e:
+            refinement_logger.error("课后精修异常: {}", e, exc_info=True)
+            await self._broadcast("refinement_status", {"status": "failed", "session_id": session_id, "message": str(e)})
+            # 即使异常也要更新会话状态
+            try:
+                async with async_session() as db:
+                    result = await db.execute(select(Session).where(Session.id == session_id))
+                    session = result.scalar_one_or_none()
+                    if session:
+                        session.refinement_status = "failed"
+                        await db.commit()
+            except Exception:
+                pass
             return
 
-        hot_words = ""
-        async with async_session() as db:
-            result = await db.execute(
-                select(Session).where(Session.id == session_id)
-            )
-            session = result.scalar_one_or_none()
-            if session:
-                result2 = await db.execute(
-                    select(Course).where(Course.id == session.course_id)
-                )
-                course = result2.scalar_one_or_none()
-                if course:
-                    hot_words = course.hot_words or ""
-
-        async def progress_callback(sid, progress, result, path):
-            # 保存精修结果到数据库
-            if result:
-                await self._save_refined_results(sid, result)
-            await self._broadcast("refinement_status", {
-                "status": "in_progress",
-                "progress": progress,
-                "session_id": sid,
-            })
-
-        await self.refinement_service.start_post_session_refinement(
-            session_id=session_id,
-            recording_paths=paths,
-            hot_words=hot_words,
-            language=settings.language,
-            progress_callback=progress_callback,
-        )
-
         # 更新会话精修状态
+        final_status = "completed" if saved_count > 0 else "completed"
         async with async_session() as db:
             result = await db.execute(select(Session).where(Session.id == session_id))
             session = result.scalar_one_or_none()
             if session:
-                session.refinement_status = "completed"
+                session.refinement_status = final_status
                 session.refinement_progress = 1.0
                 await db.commit()
 
         await self._broadcast("refinement_status", {"status": "completed", "progress": 1.0, "session_id": session_id})
+        if saved_count == 0:
+            refinement_logger.warning("课后精修完成但无有效结果: {}", session_id)
+        else:
+            refinement_logger.info("课后精修完成: session={}, 精修片段数={}", session_id, saved_count)
 
     async def _save_refined_results(self, session_id: str, refined_segments: list[dict]):
         """将精修结果保存到对应的 Transcription 记录"""
