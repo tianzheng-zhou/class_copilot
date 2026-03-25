@@ -31,20 +31,38 @@ class AudioService:
         self._start_time: float = 0
         self._device_index: int | None = None
 
-    def list_devices(self) -> list[dict]:
-        """列出所有可用的音频输入设备"""
+    def list_devices(self) -> dict:
+        """列出所有可用的音频输入设备（Windows 上只返回 WASAPI 设备以避免重复）"""
+        import platform
         devices = sd.query_devices()
         input_devices = []
+
+        # Windows 上只保留 WASAPI 主机 API 的设备，避免同一物理设备重复出现
+        wasapi_device_indices = None
+        if platform.system() == "Windows":
+            try:
+                hostapis = sd.query_hostapis()
+                for api in hostapis:
+                    if "WASAPI" in api["name"]:
+                        wasapi_device_indices = set(api["devices"])
+                        break
+            except Exception:
+                pass
+
         for i, d in enumerate(devices):
-            if d["max_input_channels"] > 0:
-                input_devices.append({
-                    "index": i,
-                    "name": d["name"],
-                    "channels": d["max_input_channels"],
-                    "sample_rate": d["default_samplerate"],
-                    "is_default": i == sd.default.device[0],
-                })
-        return input_devices
+            if d["max_input_channels"] <= 0:
+                continue
+            if wasapi_device_indices is not None and i not in wasapi_device_indices:
+                continue
+            input_devices.append({
+                "index": i,
+                "name": d["name"],
+                "channels": d["max_input_channels"],
+                "sample_rate": d["default_samplerate"],
+                "is_default": i == sd.default.device[0],
+            })
+
+        return {"devices": input_devices, "current_device": self._device_index}
 
     def set_device(self, device_index: int | None):
         """设置音频输入设备"""

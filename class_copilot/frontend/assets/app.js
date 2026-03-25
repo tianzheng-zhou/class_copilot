@@ -1131,10 +1131,15 @@ async function loadSettings() {
 
         // 加载音频设备
         const devResp = await fetch('/api/audio/devices');
-        const devices = await devResp.json();
+        const devData = await devResp.json();
+        const devices = devData.devices || [];
+        const currentDevice = devData.current_device;
         const micSelect = document.getElementById('settingMicrophone');
         micSelect.innerHTML = '<option value="">系统默认</option>' +
-            devices.map(d => `<option value="${d.index}" ${d.is_default ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
+            devices.map(d => {
+                const selected = (currentDevice != null && d.index === currentDevice) ? 'selected' : '';
+                return `<option value="${d.index}" ${selected}>${escapeHtml(d.name)}</option>`;
+            }).join('');
 
         // 加载课程列表
         const courseResp = await fetch('/api/courses');
