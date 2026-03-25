@@ -42,10 +42,10 @@ class Settings(BaseSettings):
 
     # DashScope ASR 配置
     asr_model: str = Field(
-        default="paraformer-realtime-v2", description="DashScope实时ASR模型"
+        default="qwen3-asr-flash-realtime", description="DashScope实时ASR模型"
     )
     refined_asr_model: str = Field(
-        default="paraformer-v2", description="DashScope精修ASR模型(文件转写)"
+        default="qwen3-asr-flash-filetrans", description="DashScope精修ASR模型(文件转写)"
     )
 
     # 豆包(火山引擎)ASR 配置 (v3 大模型版)

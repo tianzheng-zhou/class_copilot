@@ -1,11 +1,10 @@
-"""精修 ASR 服务 - 使用 DashScope 文件转写 API (Transcription) 进行高精度离线转写
+"""精修 ASR 服务 - 使用 DashScope Qwen-ASR 异步文件转写 API 进行高精度离线转写
 
-已验证的 API 流程 (2025-01 测试通过):
+基于 qwen3-asr-flash-filetrans 模型的异步调用流程:
   1. Files.upload(file_path, purpose="file-extract") → uploaded_files[0]["file_id"]
   2. Files.get(file_id) → output["url"]  (OSS HTTP URL)
-  3. Transcription.async_call(model="paraformer-v2", file_urls=[url]) → task_id
-  4. Transcription.fetch(task=task_id) 轮询 → results[0]["transcription_url"]
-  5. 下载 transcription_url JSON → transcripts[0]["sentences"][]{begin_time, end_time, text}
+  3. Transcription.async_call(model, input={"file_url": url}, parameters={...}) → task_id
+  4. Transcription.fetch(task=task_id) 轮询 → result.transcripts[].sentences[]
      时间单位为毫秒。
 """
 
@@ -14,7 +13,6 @@ import time
 from pathlib import Path
 
 import dashscope
-import httpx
 
 from class_copilot.config import settings
 from class_copilot.logger import refinement_logger
@@ -96,18 +94,17 @@ class RefinementService:
 
             refinement_logger.debug("获取到文件URL (长度={})", len(file_url))
 
-            # ── 步骤3: 提交转写任务 ──
+            # ── 步骤3: 提交转写任务 (Qwen-ASR 异步调用) ──
             call_params = {
                 "model": settings.refined_asr_model,
-                "file_urls": [file_url],
+                "input": {"file_url": file_url},
                 "api_key": settings.dashscope_api_key,
             }
+            parameters = {}
             if language:
-                call_params["language_hints"] = [language]
-            if hot_words:
-                words = [w.strip() for w in hot_words.split(",") if w.strip()]
-                if words:
-                    call_params["vocabulary"] = [{"text": w, "weight": 4} for w in words]
+                parameters["language"] = language
+            if parameters:
+                call_params["parameters"] = parameters
 
             response = await asyncio.to_thread(
                 dashscope.audio.asr.Transcription.async_call,
@@ -174,45 +171,30 @@ class RefinementService:
         return None
 
     async def _parse_transcription_result(self, output: dict) -> list[dict]:
-        """解析转写结果，获取文本和时间戳"""
+        """解析 Qwen-ASR 转写结果，获取文本和时间戳"""
         results = []
-        task_results = output.get("results", [])
+        # Qwen-ASR 异步调用结果直接包含 result.transcripts
+        result = output.get("result", {})
+        transcripts = result.get("transcripts", [])
 
-        for item in task_results:
-            transcription_url = item.get("transcription_url")
-            if not transcription_url:
-                continue
-
-            # 下载转写结果 JSON
-            try:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(transcription_url)
-                    resp.raise_for_status()
-                    data = resp.json()
-            except Exception as e:
-                refinement_logger.error("下载转写结果失败: {}", e)
-                continue
-
-            # 解析 transcripts
-            transcripts = data.get("transcripts", [])
-            for transcript in transcripts:
-                sentences = transcript.get("sentences", [])
-                if sentences:
-                    for sent in sentences:
-                        results.append({
-                            "text": sent.get("text", ""),
-                            "start_time": sent.get("begin_time", 0) / 1000.0,
-                            "end_time": sent.get("end_time", 0) / 1000.0,
-                        })
-                else:
-                    # 没有句级结果时使用整体文本
-                    text = transcript.get("text", "")
-                    if text:
-                        results.append({
-                            "text": text,
-                            "start_time": 0,
-                            "end_time": 0,
-                        })
+        for transcript in transcripts:
+            sentences = transcript.get("sentences", [])
+            if sentences:
+                for sent in sentences:
+                    results.append({
+                        "text": sent.get("text", ""),
+                        "start_time": sent.get("begin_time", 0) / 1000.0,
+                        "end_time": sent.get("end_time", 0) / 1000.0,
+                    })
+            else:
+                # 没有句级结果时使用整体文本
+                text = transcript.get("text", "")
+                if text:
+                    results.append({
+                        "text": text,
+                        "start_time": 0,
+                        "end_time": 0,
+                    })
 
         return results
 
