@@ -1,7 +1,6 @@
 """会话管理器 - 协调所有服务的中枢"""
 
 import asyncio
-import calendar
 import time
 from datetime import datetime
 from pathlib import Path
@@ -158,7 +157,7 @@ class SessionManager:
                     await db.execute(
                         sql_update(Session)
                         .where(Session.id == self.current_session_id)
-                        .values(status="interrupted", ended_at=datetime.utcnow())
+                        .values(status="interrupted", ended_at=datetime.now())
                     )
                     await db.commit()
             except Exception as db_err:
@@ -221,7 +220,7 @@ class SessionManager:
                         .values(
                             duration_seconds=recording_info["duration_seconds"],
                             file_size_bytes=recording_info["file_size_bytes"],
-                            ended_at=datetime.utcnow(),
+                            ended_at=datetime.now(),
                         )
                     )
                 # 始终更新会话状态
@@ -229,7 +228,7 @@ class SessionManager:
                     await db.execute(
                         sql_update(Session)
                         .where(Session.id == self.current_session_id)
-                        .values(status="stopped", ended_at=datetime.utcnow())
+                        .values(status="stopped", ended_at=datetime.now())
                     )
                 await db.commit()
         except Exception as e:
@@ -240,8 +239,18 @@ class SessionManager:
         logger.info("停止监听: session={}", self.current_session_id)
 
         # 课后精修
+        refinement_logger.info(
+            "精修触发检查: enable_refinement={}, refinement_strategy={}",
+            settings.enable_refinement, settings.refinement_strategy,
+        )
         if settings.enable_refinement and settings.refinement_strategy == "post":
+            refinement_logger.info("自动课后精修已触发: session={}", self.current_session_id)
+            await self._broadcast("notification", {"type": "info", "message": "正在启动课后精修..."})
             asyncio.create_task(self._start_post_refinement())
+        elif settings.enable_refinement:
+            refinement_logger.info("精修已启用但策略为 '{}', 不自动触发", settings.refinement_strategy)
+        else:
+            refinement_logger.debug("精修未启用，跳过自动触发")
 
     async def toggle_listening(self):
         """切换监听状态"""
@@ -711,7 +720,7 @@ class SessionManager:
                         refined_text=seg["text"],
                         is_final=True,
                         refinement_status="refined",
-                        refined_at=datetime.utcnow(),
+                        refined_at=datetime.now(),
                     )
                     db.add(trans)
                 await db.commit()
@@ -738,7 +747,7 @@ class SessionManager:
                     continue
                 orig.refined_text = refined_segments[seg_idx]["text"]
                 orig.refinement_status = "refined"
-                orig.refined_at = datetime.utcnow()
+                orig.refined_at = datetime.now()
                 used_seg_idxs.add(seg_idx)
                 used_orig_ids.add(orig.id)
 
@@ -756,7 +765,7 @@ class SessionManager:
                         refined_text=seg["text"],
                         is_final=True,
                         refinement_status="refined",
-                        refined_at=datetime.utcnow(),
+                        refined_at=datetime.now(),
                     )
                     db.add(trans)
 
@@ -884,7 +893,7 @@ class SessionManager:
         self._transcription_seq = max_seq
 
         # 广播 recall_data，前端接收后填充UI
-        session_epoch = calendar.timegm(session.started_at.timetuple()) if session.started_at else 0
+        session_epoch = time.mktime(session.started_at.timetuple()) if session.started_at else 0
 
         recall_transcriptions = [{
             "text": t.best_text,

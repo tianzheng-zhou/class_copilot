@@ -885,12 +885,26 @@ function renderHistoryList(sessions) {
             : '';
 
         const startTime = s.started_at ? new Date(s.started_at).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) : '';
+        const endTime = s.ended_at ? new Date(s.ended_at).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) : '';
+        const timeRange = startTime ? (endTime ? `${startTime} - ${endTime}` : `${startTime} 起`) : '';
+
+        // 计算时长
+        let durationStr = '';
+        if (s.started_at && s.ended_at) {
+            const mins = Math.round((new Date(s.ended_at) - new Date(s.started_at)) / 60000);
+            if (mins >= 60) {
+                durationStr = `${Math.floor(mins / 60)}h${mins % 60 ? mins % 60 + 'min' : ''}`;
+            } else if (mins > 0) {
+                durationStr = `${mins}min`;
+            }
+        }
+
         const displayName = s.custom_name || s.course_name;
 
         return `
             <div class="history-item" onclick="viewSession('${s.id}')">
                 <div class="history-item-info">
-                    <div class="history-item-date">${escapeHtml(s.date)}${startTime ? ' ' + startTime : ''}</div>
+                    <div class="history-item-date">${escapeHtml(s.date)}${timeRange ? ' ' + timeRange : ''}${durationStr ? ` <span style="color:var(--text-muted);font-size:11px;">(${durationStr})</span>` : ''}</div>
                     <div class="history-item-course">${escapeHtml(displayName)}${s.custom_name ? ` <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(s.course_name)})</span>` : ''}</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">

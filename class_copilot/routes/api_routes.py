@@ -1,8 +1,8 @@
 """REST API 路由 - 历史查询、设置、导出等"""
 
 import asyncio
-import calendar
 import io
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -145,8 +145,8 @@ async def get_session_detail(session_id: str):
         )
         chat_messages = chat_result.scalars().all()
 
-        # 将相对时间转为绝对 epoch 时间
-        session_epoch = calendar.timegm(session.started_at.timetuple()) if session.started_at else 0
+        # 将相对时间转为绝对 epoch 时间（本地时间）
+        session_epoch = time.mktime(session.started_at.timetuple()) if session.started_at else 0
 
         return {
             "session": {

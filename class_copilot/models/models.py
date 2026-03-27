@@ -25,8 +25,8 @@ class Course(Base):
     name = Column(String(200), nullable=False, unique=True, index=True)
     language = Column(String(10), default="zh")  # zh / en
     hot_words = Column(Text, default="")  # 逗号分隔的热词
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     sessions = relationship("Session", back_populates="course", cascade="all, delete-orphan")
     voiceprints = relationship("Voiceprint", back_populates="course", cascade="all, delete-orphan")
@@ -41,9 +41,7 @@ class Session(Base):
     course_id = Column(String(36), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     custom_name = Column(String(200), nullable=True)  # 用户自定义会话名称
     date = Column(String(10), nullable=False)  # YYYY-MM-DD
-    started_at = Column(DateTime, default=datetime.utcnow)
-    ended_at = Column(DateTime, nullable=True)
-    status = Column(String(20), default="active")  # active / stopped / interrupted
+    started_at = Column(DateTime, default=datetime.now)  # active / stopped / interrupted
     refinement_status = Column(String(20), default="none")  # none / pending / in_progress / completed / partial / failed
     refinement_progress = Column(Float, default=0.0)  # 0.0 ~ 1.0
     refinement_strategy = Column(String(20), default="post")  # post / periodic / manual
@@ -65,7 +63,7 @@ class Recording(Base):
     file_path = Column(String(500), nullable=False)
     duration_seconds = Column(Float, default=0.0)
     file_size_bytes = Column(Integer, default=0)
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=datetime.now)
     ended_at = Column(DateTime, nullable=True)
     sequence_number = Column(Integer, default=1)  # 续记时的序号
 
@@ -104,7 +102,7 @@ class Transcription(Base):
     language = Column(String(10), default="zh")
     translation = Column(Text, nullable=True)  # 翻译文本
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     session = relationship("Session", back_populates="transcriptions")
 
@@ -127,7 +125,7 @@ class Question(Base):
     confidence = Column(Float, default=0.0)
     context_text = Column(Text, nullable=True)  # 问题上下文
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     session = relationship("Session", back_populates="questions")
     answers = relationship("Answer", back_populates="question", cascade="all, delete-orphan")
@@ -147,8 +145,8 @@ class Answer(Base):
     is_refined_update = Column(Boolean, default=False)  # 是否基于精修文本更新
     generating = Column(Boolean, default=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     question = relationship("Question", back_populates="answers")
 
@@ -170,7 +168,7 @@ class ChatMessage(Base):
     model_used = Column(String(50), nullable=True)
     think_mode = Column(Boolean, default=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     session = relationship("Session", back_populates="chat_messages")
 
@@ -184,7 +182,7 @@ class Voiceprint(Base):
     course_id = Column(String(36), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     teacher_name = Column(String(100), nullable=False)
     speaker_label = Column(String(50), nullable=False)  # 云端声纹 ID
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     course = relationship("Course", back_populates="voiceprints")
 
@@ -209,8 +207,8 @@ class RefinementTask(Base):
     audio_start_time = Column(Float, nullable=True)  # 音频片段起始时间
     audio_end_time = Column(Float, nullable=True)  # 音频片段结束时间
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     completed_at = Column(DateTime, nullable=True)
 
 
@@ -222,4 +220,4 @@ class SettingItem(Base):
     key = Column(String(100), primary_key=True)
     value = Column(Text, nullable=False)
     is_encrypted = Column(Boolean, default=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

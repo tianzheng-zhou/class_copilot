@@ -93,7 +93,7 @@ async def _fix_stale_sessions():
             result = await db.execute(
                 sql_update(Session)
                 .where(Session.status == "active")
-                .values(status="interrupted", ended_at=datetime.utcnow())
+                .values(status="interrupted", ended_at=datetime.now())
             )
             await db.commit()
             if result.rowcount:
