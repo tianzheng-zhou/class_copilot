@@ -407,8 +407,16 @@ class SessionManager:
         # 广播到前端（将相对时间转为绝对 epoch 时间）
         rel_start = result.get("start_time", 0)
         rel_end = result.get("end_time", 0)
-        abs_start = (self._recording_started_at + rel_start) if self._recording_started_at and rel_start else 0
-        abs_end = (self._recording_started_at + rel_end) if self._recording_started_at and rel_end else 0
+        if self._recording_started_at and (rel_start or rel_end):
+            abs_start = self._recording_started_at + rel_start
+            abs_end = self._recording_started_at + rel_end
+        elif self._recording_started_at:
+            # ASR 未提供时间戳时，使用当前时间作为回退
+            abs_start = time.time()
+            abs_end = abs_start
+        else:
+            abs_start = 0
+            abs_end = 0
         await self._broadcast("transcription", {
             "text": text,
             "is_final": is_final,

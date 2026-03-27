@@ -149,6 +149,9 @@ function handleServerMessage(msg) {
         case 'recall_data':
             handleRecallData(data);
             break;
+        case 'mic_level':
+            handleMicLevel(data);
+            break;
         case 'info':
             showToast(data.message);
             break;
@@ -1268,6 +1271,80 @@ function toggleRefinementSettings() {
     document.getElementById('btnManualRefine').style.display = enabled ? 'inline-flex' : 'none';
 }
 
+// ──────────── 麦克风音量监控 ────────────
+let micMonitorActive = false;
+let micClipCount = 0;
+
+function handleMicLevel(data) {
+    if (!micMonitorActive) return;
+    const db = data.db;
+    const clipping = data.clipping;
+    const bar = document.getElementById('micLevelBar');
+    const dbLabel = document.getElementById('micDbValue');
+    const clipEl = document.getElementById('micClipIndicator');
+    if (!bar) return;
+
+    // dB 映射到百分比：-60 dB = 0%，0 dB = 100%
+    const DB_MIN = -60;
+    const DB_MAX = 0;
+    const pct = Math.max(0, Math.min(100, (db - DB_MIN) / (DB_MAX - DB_MIN) * 100));
+    bar.style.width = pct + '%';
+
+    // 根据 dB 值确定颜色等级
+    // -60 ~ -35: 过低  -35 ~ -8: 合适  -8 ~ 0: 过高
+    bar.classList.remove('level-low', 'level-good', 'level-high');
+    if (db < -35) {
+        bar.classList.add('level-low');
+    } else if (db < -8) {
+        bar.classList.add('level-good');
+    } else {
+        bar.classList.add('level-high');
+    }
+
+    // 削波指示
+    if (clipping) {
+        micClipCount++;
+        if (clipEl) {
+            clipEl.style.display = 'inline';
+            clipEl.classList.add('clip-flash');
+        }
+    } else {
+        if (micClipCount > 0) micClipCount = Math.max(0, micClipCount - 1);
+        if (micClipCount === 0 && clipEl) {
+            clipEl.classList.remove('clip-flash');
+            clipEl.style.display = 'none';
+        }
+    }
+
+    if (dbLabel) {
+        dbLabel.textContent = db.toFixed(1) + ' dB';
+    }
+}
+
+async function toggleMicMonitor() {
+    const btn = document.getElementById('btnMicMonitor');
+    if (micMonitorActive) {
+        await fetch('/api/audio/mic-monitor/stop', { method: 'POST' });
+        micMonitorActive = false;
+        micClipCount = 0;
+        btn.textContent = '🎤 开始测试';
+        document.getElementById('micLevelBar').style.width = '0%';
+        document.getElementById('micDbValue').textContent = '-- dB';
+        document.getElementById('micClipIndicator').style.display = 'none';
+    } else {
+        // 先保存当前选择的麦克风设备
+        const mic = document.getElementById('settingMicrophone').value;
+        await fetch('/api/audio/device', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_index: mic ? parseInt(mic) : null }),
+        });
+        await fetch('/api/audio/mic-monitor/start', { method: 'POST' });
+        micMonitorActive = true;
+        btn.textContent = '⏹ 停止测试';
+    }
+}
+
 function openSettings() {
     document.getElementById('settingsModal').style.display = 'flex';
     loadSettings();
@@ -1275,6 +1352,13 @@ function openSettings() {
 
 function closeSettings() {
     document.getElementById('settingsModal').style.display = 'none';
+    // 关闭设置时自动停止麦克风监控
+    if (micMonitorActive) {
+        fetch('/api/audio/mic-monitor/stop', { method: 'POST' });
+        micMonitorActive = false;
+        const btn = document.getElementById('btnMicMonitor');
+        if (btn) btn.textContent = '🎤 开始测试';
+    }
 }
 
 // ──────────── 选项卡切换 ────────────
@@ -1419,6 +1503,22 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
     document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
     document.getElementById('settingRefinement').addEventListener('change', toggleRefinementSettings);
+
+    // 麦克风监控
+    document.getElementById('btnMicMonitor').addEventListener('click', toggleMicMonitor);
+
+    // 切换麦克风时自动停止监控
+    document.getElementById('settingMicrophone').addEventListener('change', () => {
+        if (micMonitorActive) {
+            fetch('/api/audio/mic-monitor/stop', { method: 'POST' });
+            micMonitorActive = false;
+            micClipCount = 0;
+            document.getElementById('btnMicMonitor').textContent = '🎤 开始测试';
+            document.getElementById('micLevelBar').style.width = '0%';
+            document.getElementById('micDbValue').textContent = '-- dB';
+            document.getElementById('micClipIndicator').style.display = 'none';
+        }
+    });
 
 
     // OSS 测试连接

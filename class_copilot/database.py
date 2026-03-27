@@ -44,6 +44,20 @@ async def init_db():
         except Exception:
             pass  # 列已存在则忽略
 
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE sessions ADD COLUMN status VARCHAR(20) DEFAULT 'active'"
+            )
+        except Exception:
+            pass
+
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE sessions ADD COLUMN ended_at DATETIME"
+            )
+        except Exception:
+            pass
+
 
 async def get_db() -> AsyncSession:
     """获取数据库会话"""

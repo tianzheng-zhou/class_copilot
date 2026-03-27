@@ -963,3 +963,126 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
+/* ──────────── Mic Monitor ──────────── */
+.mic-monitor {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.mic-meter-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.mic-meter-bar {
+    position: relative;
+    height: 22px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.mic-level-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0%;
+    background: var(--success);
+    border-radius: 3px;
+    transition: width 0.06s linear, background-color 0.2s;
+    z-index: 2;
+}
+
+.mic-level-fill.level-low {
+    background: #f59e0b;
+}
+
+.mic-level-fill.level-good {
+    background: var(--success);
+}
+
+.mic-level-fill.level-high {
+    background: var(--danger);
+}
+
+/* 背景区域标识 — dB 刻度: -60=0%, 0=100% */
+/* -60 ~ -35 dB → 0% ~ 41.7%  过低 */
+/* -35 ~ -8 dB  → 41.7% ~ 86.7%  合适 */
+/* -8 ~ 0 dB    → 86.7% ~ 100%  过高 */
+.mic-zone {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    z-index: 1;
+    opacity: 0.15;
+}
+
+.mic-zone-low {
+    left: 0;
+    width: 41.7%;
+    background: #f59e0b;
+}
+
+.mic-zone-good {
+    left: 41.7%;
+    width: 45%;
+    background: var(--success);
+}
+
+.mic-zone-high {
+    left: 86.7%;
+    width: 13.3%;
+    background: var(--danger);
+}
+
+.mic-meter-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 0 2px;
+}
+
+.mic-meter-labels .mic-label-good {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.mic-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    min-width: 60px;
+}
+
+.mic-db-value {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: right;
+    font-family: monospace;
+    white-space: nowrap;
+}
+
+.mic-clip-indicator {
+    font-size: 11px;
+    color: var(--danger);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.mic-clip-indicator.clip-flash {
+    animation: clipFlash 0.3s ease-in-out;
+}
+
+@keyframes clipFlash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}

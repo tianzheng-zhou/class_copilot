@@ -41,7 +41,9 @@ class Session(Base):
     course_id = Column(String(36), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     custom_name = Column(String(200), nullable=True)  # 用户自定义会话名称
     date = Column(String(10), nullable=False)  # YYYY-MM-DD
-    started_at = Column(DateTime, default=datetime.now)  # active / stopped / interrupted
+    started_at = Column(DateTime, default=datetime.now)
+    ended_at = Column(DateTime, nullable=True)
+    status = Column(String(20), default="active")  # active / stopped / interrupted
     refinement_status = Column(String(20), default="none")  # none / pending / in_progress / completed / partial / failed
     refinement_progress = Column(Float, default=0.0)  # 0.0 ~ 1.0
     refinement_strategy = Column(String(20), default="post")  # post / periodic / manual

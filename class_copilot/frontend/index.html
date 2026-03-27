@@ -233,6 +233,32 @@
                             <select id="settingMicrophone"></select>
                         </div>
                         <div class="form-group">
+                            <label>麦克风音量测试</label>
+                            <div class="mic-monitor">
+                                <button id="btnMicMonitor" class="btn btn-small">🎤 开始测试</button>
+                                <div class="mic-meter-wrapper">
+                                    <div class="mic-meter-bar">
+                                        <div id="micLevelBar" class="mic-level-fill"></div>
+                                        <div class="mic-zone mic-zone-low" title="音量过低：VAD 可能不触发"></div>
+                                        <div class="mic-zone mic-zone-good" title="合适音量"></div>
+                                        <div class="mic-zone mic-zone-high" title="音量偏高：注意削波"></div>
+                                    </div>
+                                    <div class="mic-meter-labels">
+                                        <span>-60</span>
+                                        <span>-40</span>
+                                        <span class="mic-label-good">-30 ~ -10 合适</span>
+                                        <span>-5</span>
+                                        <span>0 dB</span>
+                                    </div>
+                                </div>
+                                <div class="mic-info">
+                                    <span id="micDbValue" class="mic-db-value">-- dB</span>
+                                    <span id="micClipIndicator" class="mic-clip-indicator" style="display:none;">⚠️ 削波</span>
+                                </div>
+                            </div>
+                            <small>对着麦克风说话，观察音量条。正常说话应在绿色区间（-30~-10 dB）。若用扩音设备请降低系统增益，避免红色区域削波</small>
+                        </div>
+                        <div class="form-group">
                             <label>课程热词（逗号分隔）</label>
                             <input type="text" id="settingHotWords" placeholder="马克思主义,辩证法,唯物论">
                         </div>

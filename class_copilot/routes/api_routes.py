@@ -503,6 +503,36 @@ async def set_audio_device(data: dict):
     return {"status": "updated"}
 
 
+@router.post("/audio/mic-monitor/start")
+async def start_mic_monitor():
+    """启动麦克风音量监控，音量数据通过 WebSocket 广播"""
+    if session_manager.audio_service.is_monitoring:
+        return {"status": "already_monitoring"}
+
+    def on_level(db, peak, clipping):
+        try:
+            session_manager.ws_broadcast_queue.put_nowait({
+                "type": "mic_level",
+                "data": {
+                    "db": round(db, 1),
+                    "peak": round(peak / 32768.0, 4),
+                    "clipping": clipping,
+                },
+            })
+        except asyncio.QueueFull:
+            pass
+
+    session_manager.audio_service.start_mic_monitor(on_level)
+    return {"status": "started"}
+
+
+@router.post("/audio/mic-monitor/stop")
+async def stop_mic_monitor():
+    """停止麦克风音量监控"""
+    session_manager.audio_service.stop_mic_monitor()
+    return {"status": "stopped"}
+
+
 # ──────────── 声纹管理 ────────────
 
 @router.get("/voiceprints")

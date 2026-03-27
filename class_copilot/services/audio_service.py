@@ -31,6 +31,12 @@ class AudioService:
         self._start_time: float = 0
         self._device_index: int | None = None
 
+        # 麦克风监控
+        self._monitor_stream = None
+        self._monitor_loop: asyncio.AbstractEventLoop | None = None
+        self._monitor_callback = None
+        self.is_monitoring = False
+
     def list_devices(self) -> dict:
         """列出所有可用的音频输入设备（Windows 上只返回 WASAPI 设备以避免重复）"""
         import platform
@@ -166,3 +172,52 @@ class AudioService:
         if self.is_recording:
             return time.time() - self._start_time
         return 0
+
+    def start_mic_monitor(self, callback):
+        """开始麦克风音量监控，callback(rms, db) 将在每个音频块上被调用"""
+        if self.is_monitoring:
+            return
+        self._monitor_loop = asyncio.get_event_loop()
+        self._monitor_callback = callback
+        self.is_monitoring = True
+
+        self._monitor_stream = sd.InputStream(
+            samplerate=self.sample_rate,
+            channels=self.channels,
+            dtype="int16",
+            blocksize=int(self.sample_rate * 0.05),  # 50ms 块，更流畅
+            device=self._device_index,
+            callback=self._monitor_audio_callback,
+        )
+        self._monitor_stream.start()
+        logger.info("麦克风监控已启动")
+
+    def _monitor_audio_callback(self, indata: np.ndarray, frames: int, time_info, status):
+        """监控音频流回调"""
+        if status:
+            logger.warning("监控音频流状态: {}", status)
+
+        samples = indata[:, 0].astype(np.float64)
+        rms = np.sqrt(np.mean(samples ** 2))
+        peak = np.max(np.abs(samples))
+        # dBFS（相对满幅 32768）
+        db = 20 * np.log10(max(rms, 1) / 32768.0)
+        # 峰值接近满幅视为削波（>= 32000，约 -0.2 dBFS）
+        clipping = bool(peak >= 32000)
+
+        if self._monitor_loop and self._monitor_callback:
+            self._monitor_loop.call_soon_threadsafe(
+                self._monitor_callback, db, peak, clipping
+            )
+
+    def stop_mic_monitor(self):
+        """停止麦克风音量监控"""
+        if not self.is_monitoring:
+            return
+        self.is_monitoring = False
+        if self._monitor_stream:
+            self._monitor_stream.stop()
+            self._monitor_stream.close()
+            self._monitor_stream = None
+        self._monitor_callback = None
+        logger.info("麦克风监控已停止")
