@@ -98,10 +98,8 @@ def _parse_server_frame(data: bytes) -> dict:
 class DoubaoRealtimeASRService:
     """豆包实时 ASR 管理（火山引擎 v3 大模型流式语音识别）"""
 
-    # 双向流式模式：实时逐字返回，但不支持 language 参数（默认中英混合，偏向中文）
+    # 双向流式模式：实时逐字返回，默认中英混合识别
     WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
-    # 流式输入模式：支持 language 参数指定语种，结果在约15s或末包后返回
-    WS_URL_NOSTREAM = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
 
     def __init__(self):
         self._ws = None
@@ -126,14 +124,11 @@ class DoubaoRealtimeASRService:
         if not token:
             raise ValueError("豆包 ASR 配置不完整: 请设置 doubao_access_token（新版控制台 API Key）")
 
-        # 语言映射: 豆包 v3 bigmodel 使用 BCP-47 格式
-        lang_map = {"zh": "zh-CN", "en": "en-US"}
-        doubao_lang = lang_map.get(language, "zh-CN")
+        # 语言记录（bigmodel 流式模式不支持 language 参数，但默认中英混合识别）
 
-        # 非中文使用 bigmodel_nostream（支持 language 参数，识别更准确）
-        # 中文使用 bigmodel（双向流式，实时逐字返回）
-        use_nostream = language != "zh"
-        ws_url = self.WS_URL_NOSTREAM if use_nostream else self.WS_URL
+        # 始终使用 bigmodel（双向流式，实时逐字返回）
+        # bigmodel 默认中英混合识别，不支持 language 参数但可处理英文
+        ws_url = self.WS_URL
 
         connect_id = str(uuid.uuid4())
 
@@ -168,9 +163,7 @@ class DoubaoRealtimeASRService:
             "bits": 16,
             "channel": settings.channels,
         }
-        # language 参数仅在 bigmodel_nostream 下生效
-        if use_nostream:
-            audio_config["language"] = doubao_lang
+        # bigmodel 流式模式不支持 language 参数（默认中英混合识别）
 
         req_payload = {
             "user": {"uid": "class_copilot_user"},
@@ -209,8 +202,7 @@ class DoubaoRealtimeASRService:
 
         # 启动接收协程
         self._recv_task = asyncio.create_task(self._receive_loop())
-        mode = "nostream" if use_nostream else "stream"
-        asr_logger.info("豆包实时 ASR 已启动 (v3 {}), resource_id={}, 语言={}", mode, resource_id, language)
+        asr_logger.info("豆包实时 ASR 已启动 (v3 stream), resource_id={}, 语言={}", resource_id, language)
 
     async def send_audio(self, audio_bytes: bytes):
         """发送 PCM 音频帧"""
