@@ -75,6 +75,37 @@ class AudioService:
         self._device_index = device_index
         logger.info("设置音频设备: {}", device_index)
 
+    def _get_monitor_stream_config(self) -> dict:
+        """根据当前设备生成更稳妥的监控流配置。"""
+        sample_rate = self.sample_rate
+        channels = self.channels
+
+        try:
+            device_index = self._device_index
+            if device_index is None:
+                default_device = sd.default.device[0]
+                if default_device is not None and default_device >= 0:
+                    device_index = int(default_device)
+
+            if device_index is not None:
+                device_info = sd.query_devices(device_index, "input")
+                if device_info["max_input_channels"] <= 0:
+                    raise ValueError("所选设备不支持音频输入")
+
+                channels = min(self.channels, int(device_info["max_input_channels"]))
+                sample_rate = int(device_info.get("default_samplerate") or self.sample_rate)
+        except Exception as e:
+            logger.warning("读取麦克风监控设备配置失败，回退到默认参数: {}", e)
+
+        return {
+            "samplerate": sample_rate,
+            "channels": channels,
+            "dtype": "int16",
+            "blocksize": int(sample_rate * 0.05),
+            "device": self._device_index,
+            "callback": self._monitor_audio_callback,
+        }
+
     async def start_recording(self, session_id: str, sequence: int = 1) -> str:
         """开始录音，返回 MP3 文件路径"""
         if self.is_recording:
@@ -181,16 +212,21 @@ class AudioService:
         self._monitor_callback = callback
         self.is_monitoring = True
 
-        self._monitor_stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype="int16",
-            blocksize=int(self.sample_rate * 0.05),  # 50ms 块，更流畅
-            device=self._device_index,
-            callback=self._monitor_audio_callback,
-        )
-        self._monitor_stream.start()
-        logger.info("麦克风监控已启动")
+        try:
+            stream_config = self._get_monitor_stream_config()
+            self._monitor_stream = sd.InputStream(**stream_config)
+            self._monitor_stream.start()
+            logger.info(
+                "麦克风监控已启动: device={}, samplerate={}, channels={}",
+                self._device_index,
+                stream_config["samplerate"],
+                stream_config["channels"],
+            )
+        except Exception:
+            self.is_monitoring = False
+            self._monitor_stream = None
+            self._monitor_callback = None
+            raise
 
     def _monitor_audio_callback(self, indata: np.ndarray, frames: int, time_info, status):
         """监控音频流回调"""

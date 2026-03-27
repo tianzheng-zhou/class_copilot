@@ -522,7 +522,11 @@ async def start_mic_monitor():
         except asyncio.QueueFull:
             pass
 
-    session_manager.audio_service.start_mic_monitor(on_level)
+    try:
+        session_manager.audio_service.start_mic_monitor(on_level)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"麦克风测试启动失败: {e}") from e
+
     return {"status": "started"}
 
 
