@@ -18,18 +18,105 @@ const state = {
 };
 
 // ──────────── Markdown 渲染 ────────────
+function renderMathExpression(expression, displayMode) {
+    const raw = displayMode ? `$$${expression}$$` : `$${expression}$`;
+    if (typeof katex === 'undefined') {
+        return escapeHtml(raw);
+    }
+
+    try {
+        return katex.renderToString(expression.trim(), {
+            displayMode,
+            throwOnError: false,
+            strict: 'ignore',
+        });
+    } catch (error) {
+        console.warn('KaTeX 渲染失败:', error);
+        return escapeHtml(raw);
+    }
+}
+
+function configureMarkdownRenderer() {
+    if (typeof marked === 'undefined') {
+        return;
+    }
+
+    marked.setOptions({
+        gfm: true,
+        breaks: true,
+    });
+
+    marked.use({
+        extensions: [
+            {
+                name: 'blockMath',
+                level: 'block',
+                start(src) {
+                    const match = src.match(/\$\$/);
+                    return match ? match.index : undefined;
+                },
+                tokenizer(src) {
+                    const match = src.match(/^\$\$([\s\S]+?)\$\$(?:\n|$)/);
+                    if (!match) {
+                        return undefined;
+                    }
+
+                    return {
+                        type: 'blockMath',
+                        raw: match[0],
+                        text: match[1],
+                    };
+                },
+                renderer(token) {
+                    return renderMathExpression(token.text, true);
+                },
+            },
+            {
+                name: 'inlineMath',
+                level: 'inline',
+                start(src) {
+                    const match = src.match(/\$/);
+                    return match ? match.index : undefined;
+                },
+                tokenizer(src) {
+                    if (!src.startsWith('$') || src.startsWith('$$')) {
+                        return undefined;
+                    }
+
+                    const match = src.match(/^\$((?:\\.|[^\\$\n])+?)\$(?!\$)/);
+                    if (!match) {
+                        return undefined;
+                    }
+
+                    return {
+                        type: 'inlineMath',
+                        raw: match[0],
+                        text: match[1],
+                    };
+                },
+                renderer(token) {
+                    return renderMathExpression(token.text, false);
+                },
+            },
+        ],
+    });
+}
+
 const renderer = {
     render(text) {
+        const source = text || '';
         if (typeof marked !== 'undefined') {
-            const html = marked.parse(text);
+            const html = marked.parse(source);
             if (typeof DOMPurify !== 'undefined') {
                 return DOMPurify.sanitize(html);
             }
             return html;
         }
-        return escapeHtml(text);
+        return escapeHtml(source);
     }
 };
+
+configureMarkdownRenderer();
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -37,11 +124,29 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function highlightCode() {
+function highlightCode(root = document) {
     if (typeof hljs !== 'undefined') {
-        document.querySelectorAll('.chat-bubble pre code').forEach(el => {
+        root.querySelectorAll('pre code').forEach(el => {
             hljs.highlightElement(el);
         });
+    }
+}
+
+function renderRichContent(element, content, options = {}) {
+    if (!element) {
+        return;
+    }
+
+    const { showCursor = false } = options;
+    element.classList.add('rich-markdown');
+    element.innerHTML = renderer.render(content);
+    highlightCode(element);
+
+    if (showCursor) {
+        const cursor = document.createElement('span');
+        cursor.className = 'typing-cursor';
+        cursor.textContent = '|';
+        element.appendChild(cursor);
     }
 }
 
@@ -402,8 +507,8 @@ function renderAnswers() {
                         <button class="${!q.showDetailed ? 'active' : ''}" onclick="toggleAnswerType('${q.id}', false)">简洁版</button>
                         <button class="${q.showDetailed ? 'active' : ''}" onclick="toggleAnswerType('${q.id}', true)">展开版</button>
                     </div>
-                    <div class="answer-text ${isGenerating ? 'answer-generating' : ''}">
-                        ${isGenerating && !answerText ? '正在生成答案...' : escapeHtml(answerText)}
+                    <div class="answer-text rich-markdown ${isGenerating ? 'answer-generating' : ''}">
+                        ${isGenerating && !answerText ? '正在生成答案...' : renderer.render(answerText)}
                     </div>
                     <div class="answer-actions">
                         <button class="btn btn-small" onclick="copyText('${q.id}')">📋 复制</button>
@@ -412,6 +517,8 @@ function renderAnswers() {
             </div>
         `;
     }).join('');
+
+    highlightCode(area);
 }
 
 function toggleAnswerType(qid, showDetailed) {
@@ -464,10 +571,9 @@ function updateLastAIMessage(content, isFinal) {
 
     const contentEl = lastAI.querySelector('.chat-content');
     if (isFinal) {
-        contentEl.innerHTML = renderer.render(content);
-        highlightCode();
+        renderRichContent(contentEl, content);
     } else {
-        contentEl.innerHTML = renderer.render(content) + '<span class="typing-cursor">|</span>';
+        renderRichContent(contentEl, content, { showCursor: true });
     }
 
     area.scrollTop = area.scrollHeight;
@@ -734,13 +840,13 @@ function handleRecallData(data) {
                 msgEl.innerHTML = `
                     <div class="chat-bubble">
                         <div class="chat-role">🤖 AI ${m.model_used ? '<span class="answer-model-tag">' + escapeHtml(m.model_used) + '</span>' : ''}</div>
-                        <div class="chat-content">${renderer.render(m.content)}</div>
+                        <div class="chat-content rich-markdown">${renderer.render(m.content)}</div>
                     </div>
                 `;
             }
             chatArea.appendChild(msgEl);
         });
-        highlightCode();
+        highlightCode(chatArea);
     }
 
     // 切换到转写标签页
@@ -992,7 +1098,7 @@ async function viewSession(sessionId) {
                         ${q.answers.map(a => `
                             <div style="margin-bottom:8px;">
                                 <strong>${a.answer_type === 'brief' ? '简洁版' : '展开版'}:</strong>
-                                <div>${escapeHtml(a.content)}</div>
+                                <div class="rich-markdown">${renderer.render(a.content)}</div>
                             </div>
                         `).join('')}
                     </div>
@@ -1007,13 +1113,13 @@ async function viewSession(sessionId) {
                 if (m.role === 'user') {
                     html += `<p>🙋 <strong>你:</strong> ${escapeHtml(m.content)}</p>`;
                 } else {
-                    html += `<div style="margin:8px 0;">${renderer.render(m.content)}</div>`;
+                    html += `<div class="rich-markdown" style="margin:8px 0;">${renderer.render(m.content)}</div>`;
                 }
             });
         }
 
         document.getElementById('historyContent').innerHTML = html;
-        highlightCode();
+        highlightCode(document.getElementById('historyContent'));
 
     } catch (e) {
         showToast('加载失败', 'error');
@@ -1279,12 +1385,10 @@ let micMonitorPending = false;
 function resetMicMonitorUI() {
     micMonitorActive = false;
     micClipCount = 0;
-    const btn = document.getElementById('btnMicMonitor');
     const bar = document.getElementById('micLevelBar');
     const dbValue = document.getElementById('micDbValue');
     const clip = document.getElementById('micClipIndicator');
 
-    if (btn) btn.textContent = '🎤 开始测试';
     if (bar) bar.style.width = '0%';
     if (dbValue) dbValue.textContent = '-- dB';
     if (clip) {
@@ -1339,20 +1443,11 @@ function handleMicLevel(data) {
     }
 }
 
-async function toggleMicMonitor() {
-    const btn = document.getElementById('btnMicMonitor');
-    if (micMonitorPending || !btn) return;
+async function startMicMonitor() {
+    if (micMonitorPending || micMonitorActive) return;
 
     micMonitorPending = true;
-    btn.disabled = true;
-
     try {
-        if (micMonitorActive) {
-            await fetch('/api/audio/mic-monitor/stop', { method: 'POST' });
-            resetMicMonitorUI();
-            return;
-        }
-
         // 先保存当前选择的麦克风设备
         const mic = document.getElementById('settingMicrophone').value;
         await fetch('/api/audio/device', {
@@ -1368,14 +1463,18 @@ async function toggleMicMonitor() {
         }
 
         micMonitorActive = true;
-        btn.textContent = '⏹ 停止测试';
     } catch (e) {
         resetMicMonitorUI();
         showToast(e.message || '麦克风测试启动失败', 'error');
     } finally {
         micMonitorPending = false;
-        btn.disabled = false;
     }
+}
+
+async function stopMicMonitor() {
+    if (!micMonitorActive) return;
+    await fetch('/api/audio/mic-monitor/stop', { method: 'POST' }).catch(() => {});
+    resetMicMonitorUI();
 }
 
 function openSettings() {
@@ -1385,11 +1484,7 @@ function openSettings() {
 
 function closeSettings() {
     document.getElementById('settingsModal').style.display = 'none';
-    // 关闭设置时自动停止麦克风监控
-    if (micMonitorActive) {
-        fetch('/api/audio/mic-monitor/stop', { method: 'POST' });
-        resetMicMonitorUI();
-    }
+    stopMicMonitor();
 }
 
 // ──────────── 选项卡切换 ────────────
@@ -1535,14 +1630,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
     document.getElementById('settingRefinement').addEventListener('change', toggleRefinementSettings);
 
-    // 麦克风监控
-    document.getElementById('btnMicMonitor').addEventListener('click', toggleMicMonitor);
-
-    // 切换麦克风时自动停止监控
-    document.getElementById('settingMicrophone').addEventListener('change', () => {
+    // 切换麦克风时自动重启监控
+    document.getElementById('settingMicrophone').addEventListener('change', async () => {
         if (micMonitorActive) {
-            fetch('/api/audio/mic-monitor/stop', { method: 'POST' });
-            resetMicMonitorUI();
+            await stopMicMonitor();
+            startMicMonitor();
         }
     });
 
@@ -1605,6 +1697,13 @@ document.addEventListener('DOMContentLoaded', () => {
             tab.classList.add('active');
             const pane = document.querySelector(`.settings-pane[data-settings-pane="${tab.dataset.settingsTab}"]`);
             if (pane) pane.classList.add('active');
+
+            // 切换到音频标签页时自动开始麦克风测试，离开时自动停止
+            if (tab.dataset.settingsTab === 'audio') {
+                startMicMonitor();
+            } else {
+                stopMicMonitor();
+            }
         });
     });
 

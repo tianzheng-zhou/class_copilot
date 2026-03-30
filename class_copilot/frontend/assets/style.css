@@ -517,7 +517,7 @@ body {
 .answer-text {
     font-size: 14px;
     line-height: 1.6;
-    white-space: pre-wrap;
+    white-space: normal;
 }
 
 .answer-generating {
@@ -576,9 +576,25 @@ body {
 }
 
 /* Markdown in chat */
+.rich-markdown {
+    overflow-wrap: anywhere;
+}
+
+.rich-markdown > :first-child {
+    margin-top: 0;
+}
+
+.rich-markdown > :last-child {
+    margin-bottom: 0;
+}
+
 .chat-bubble h1, .chat-bubble h2, .chat-bubble h3 {
     margin-top: 12px;
     margin-bottom: 6px;
+}
+
+.rich-markdown p {
+    margin: 8px 0;
 }
 
 .chat-bubble pre {
@@ -603,6 +619,16 @@ body {
 .chat-bubble ul, .chat-bubble ol {
     padding-left: 20px;
     margin: 6px 0;
+}
+
+.rich-markdown .katex-display {
+    margin: 12px 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.rich-markdown .katex {
+    font-size: 1.05em;
 }
 
 .chat-input-area {

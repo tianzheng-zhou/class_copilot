@@ -54,6 +54,7 @@ class SessionManager:
         self._asr_process_task: asyncio.Task | None = None
         self._detection_task: asyncio.Task | None = None
         self._auto_stop_task: asyncio.Task | None = None
+        self._periodic_refinement_task: asyncio.Task | None = None
 
         # 定时停止
         self._auto_stop_label: str = ""  # 显示标签（如 "10:30"）
@@ -61,6 +62,9 @@ class SessionManager:
 
         # 转写序号
         self._transcription_seq = 0
+
+        # 录音分段序号（用于定时精修的录音轮换）
+        self._recording_sequence: int = 1
 
         # 录音开始时的 epoch 时间（用于将相对时间转为绝对时间）
         self._recording_started_at: float = 0
@@ -109,6 +113,7 @@ class SessionManager:
         self.status = "listening"
         self.is_listening = True
         self._transcription_seq = 0
+        self._recording_sequence = 1
         self._recording_started_at = time.time()
 
         # 获取或创建课程
@@ -171,6 +176,12 @@ class SessionManager:
         self._asr_process_task = asyncio.create_task(self._process_asr_results())
         self._detection_task = asyncio.create_task(self._auto_detect_loop())
 
+        # 课中定时精修
+        if settings.enable_refinement and settings.refinement_strategy == "periodic":
+            self._periodic_refinement_task = asyncio.create_task(self._periodic_refinement_loop())
+        else:
+            self._periodic_refinement_task = None
+
         # 定时停止
         self._auto_stop_label = auto_stop_label
         if auto_stop_seconds > 0:
@@ -198,7 +209,7 @@ class SessionManager:
 
         # 取消后台任务（跳过当前正在执行的任务，避免取消自身导致后续代码无法执行）
         current_task = asyncio.current_task()
-        for task in [self._asr_feed_task, self._asr_process_task, self._detection_task, self._auto_stop_task]:
+        for task in [self._asr_feed_task, self._asr_process_task, self._detection_task, self._auto_stop_task, self._periodic_refinement_task]:
             if task and task is not current_task:
                 task.cancel()
 
@@ -246,6 +257,10 @@ class SessionManager:
         if settings.enable_refinement and settings.refinement_strategy == "post":
             refinement_logger.info("自动课后精修已触发: session={}", self.current_session_id)
             await self._broadcast("notification", {"type": "info", "message": "正在启动课后精修..."})
+            asyncio.create_task(self._start_post_refinement())
+        elif settings.enable_refinement and settings.refinement_strategy == "periodic":
+            # 课中定时精修：停止时提交最后一段录音
+            refinement_logger.info("课中定时精修 - 提交最终录音段: session={}", self.current_session_id)
             asyncio.create_task(self._start_post_refinement())
         elif settings.enable_refinement:
             refinement_logger.info("精修已启用但策略为 '{}', 不自动触发", settings.refinement_strategy)
@@ -786,6 +801,124 @@ class SessionManager:
         if self.current_session_id:
             asyncio.create_task(self._start_post_refinement())
 
+    # ──────────── 课中定时精修 ────────────
+
+    async def _periodic_refinement_loop(self):
+        """课中定时精修循环：每 N 分钟轮换录音文件并提交旧文件进行精修"""
+        interval = settings.refinement_interval_minutes * 60
+        refinement_logger.info(
+            "课中定时精修已启动: 间隔={}分钟, session={}",
+            settings.refinement_interval_minutes, self.current_session_id,
+        )
+        try:
+            while self.is_listening:
+                await asyncio.sleep(interval)
+                if not self.is_listening:
+                    break
+
+                await self._rotate_and_refine()
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            refinement_logger.error("课中定时精修循环异常: {}", e, exc_info=True)
+
+    async def _rotate_and_refine(self):
+        """轮换录音文件：停止当前录音、启动新录音、将旧录音提交精修"""
+        if not self.current_session_id:
+            return
+
+        session_id = self.current_session_id
+        old_recording_id = self.current_recording_id
+
+        # 1. 停止当前录音
+        recording_info = await self.audio_service.stop_recording()
+        old_path = recording_info.get("file_path", "") if recording_info else ""
+
+        # 更新旧录音记录
+        if recording_info and old_recording_id:
+            try:
+                async with async_session() as db:
+                    from sqlalchemy import update as sql_update
+                    await db.execute(
+                        sql_update(Recording)
+                        .where(Recording.id == old_recording_id)
+                        .values(
+                            duration_seconds=recording_info["duration_seconds"],
+                            file_size_bytes=recording_info["file_size_bytes"],
+                            ended_at=datetime.now(),
+                        )
+                    )
+                    await db.commit()
+            except Exception as e:
+                refinement_logger.error("更新旧录音记录失败: {}", e)
+
+        # 2. 启动新录音
+        self._recording_sequence += 1
+        new_mp3_path = await self.audio_service.start_recording(
+            session_id, sequence=self._recording_sequence,
+        )
+
+        # 记录新录音到数据库
+        async with async_session() as db:
+            recording = Recording(
+                session_id=session_id,
+                file_path=new_mp3_path,
+            )
+            db.add(recording)
+            await db.commit()
+            self.current_recording_id = recording.id
+
+        # 更新录音起始时间
+        self._recording_started_at = time.time()
+
+        refinement_logger.info(
+            "录音轮换完成: seq={}, old={}, new={}",
+            self._recording_sequence, Path(old_path).name if old_path else "?", Path(new_mp3_path).name,
+        )
+
+        # 3. 将旧录音提交后台精修
+        if old_path and Path(old_path).exists():
+            asyncio.create_task(self._refine_single_recording(session_id, old_path))
+
+    async def _refine_single_recording(self, session_id: str, recording_path: str):
+        """对单个录音文件执行精修并保存结果"""
+        refinement_logger.info("提交定时精修: {}", Path(recording_path).name)
+        await self._broadcast("refinement_status", {
+            "status": "in_progress", "progress": 0, "session_id": session_id,
+        })
+
+        try:
+            hot_words = ""
+            async with async_session() as db:
+                result = await db.execute(select(Session).where(Session.id == session_id))
+                session = result.scalar_one_or_none()
+                if session:
+                    result2 = await db.execute(select(Course).where(Course.id == session.course_id))
+                    course = result2.scalar_one_or_none()
+                    if course:
+                        hot_words = course.hot_words or ""
+
+            segments = await self.refinement_service._transcribe_with_retry(
+                recording_path, hot_words, settings.language,
+            )
+
+            if segments:
+                await self._save_refined_results(session_id, segments)
+                refinement_logger.info("定时精修完成: {} 个片段, file={}", len(segments), Path(recording_path).name)
+            else:
+                refinement_logger.warning("定时精修无结果: {}", Path(recording_path).name)
+
+            await self._broadcast("refinement_status", {
+                "status": "completed", "progress": 1.0, "session_id": session_id,
+            })
+
+        except Exception as e:
+            refinement_logger.error("定时精修异常 ({}): {}", recording_path, e, exc_info=True)
+            await self._broadcast("refinement_status", {
+                "status": "failed", "session_id": session_id, "message": str(e),
+            })
+
     # ──────────── 定时停止 ────────────
 
     async def _auto_stop_loop(self):
@@ -955,6 +1088,7 @@ class SessionManager:
         self.status = "listening"
         self.is_listening = True
         self._recording_started_at = time.time()
+        self._recording_sequence = 1
 
         hot_words = await self._get_hot_words(course_id)
         mp3_path = await self.audio_service.start_recording(session_id)
@@ -989,6 +1123,12 @@ class SessionManager:
         self._asr_feed_task = asyncio.create_task(self._feed_audio_to_asr())
         self._asr_process_task = asyncio.create_task(self._process_asr_results())
         self._detection_task = asyncio.create_task(self._auto_detect_loop())
+
+        # 课中定时精修
+        if settings.enable_refinement and settings.refinement_strategy == "periodic":
+            self._periodic_refinement_task = asyncio.create_task(self._periodic_refinement_loop())
+        else:
+            self._periodic_refinement_task = None
 
         # 定时停止
         self._auto_stop_label = auto_stop_label

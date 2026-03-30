@@ -7,9 +7,12 @@
     <link rel="stylesheet" href="/assets/style.css">
     <!-- highlight.js for code blocks -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <!-- KaTeX for math formulas -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <!-- marked for markdown -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <!-- DOMPurify for XSS protection -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
 </head>
@@ -235,7 +238,6 @@
                         <div class="form-group">
                             <label>麦克风音量测试</label>
                             <div class="mic-monitor">
-                                <button id="btnMicMonitor" class="btn btn-small">🎤 开始测试</button>
                                 <div class="mic-meter-wrapper">
                                     <div class="mic-meter-bar">
                                         <div id="micLevelBar" class="mic-level-fill"></div>
