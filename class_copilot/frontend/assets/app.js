@@ -1201,6 +1201,13 @@ async function loadSettings() {
         // ASR 提供商
         document.getElementById('settingAsrProvider').value = data.asr_provider || 'dashscope';
         document.getElementById('settingRefinementProvider').value = data.refinement_provider || 'dashscope';
+        // Omni 模型选择
+        if (data.asr_model) {
+            const asrModelEl = document.getElementById('settingAsrModel');
+            if (asrModelEl) asrModelEl.value = data.asr_model;
+        }
+        _toggleAsrModelGroup();
+        document.getElementById('settingAsrProvider').addEventListener('change', _toggleAsrModelGroup);
         document.getElementById('settingAutoAnswerModel').value = data.auto_answer_model || 'qwen3.5-flash';
 
         // 更新自动回答模型选择器的选项
@@ -1337,6 +1344,7 @@ async function saveSettings() {
                 refinement_strategy: document.getElementById('settingRefinementStrategy').value,
                 refinement_interval_minutes: parseInt(document.getElementById('settingRefinementInterval').value),
                 asr_provider: document.getElementById('settingAsrProvider').value,
+                asr_model: _resolveAsrModel(),
                 refinement_provider: document.getElementById('settingRefinementProvider').value,
                 auto_answer_model: document.getElementById('settingAutoAnswerModel').value,
                 oss_bucket_name: document.getElementById('settingOssBucket').value,
@@ -1369,6 +1377,30 @@ async function saveSettings() {
     } catch (e) {
         showToast('保存失败', 'error');
     }
+}
+
+function _toggleAsrModelGroup() {
+    const provider = document.getElementById('settingAsrProvider').value;
+    const group = document.getElementById('asrModelGroup');
+    const hint = document.getElementById('asrModelHint');
+    if (group) group.style.display = provider === 'qwen_omni' ? 'block' : 'none';
+    if (hint) {
+        const hints = {
+            dashscope: '使用 qwen3-asr 系列，速度快、成本低',
+            qwen_omni: '使用 qwen3.5-omni 系列，支持更多语言和上下文',
+            doubao: '使用豆包（火山引擎）ASR 服务',
+        };
+        hint.textContent = hints[provider] || '';
+    }
+}
+
+function _resolveAsrModel() {
+    const provider = document.getElementById('settingAsrProvider').value;
+    if (provider === 'qwen_omni') {
+        return document.getElementById('settingAsrModel').value || 'qwen3.5-omni-flash-realtime';
+    }
+    // dashscope 默认模型
+    return 'qwen3-asr-flash-realtime';
 }
 
 function toggleRefinementSettings() {

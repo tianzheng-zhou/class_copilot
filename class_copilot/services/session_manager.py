@@ -17,6 +17,7 @@ from class_copilot.models.models import (
 from class_copilot.services.audio_service import AudioService
 from class_copilot.services.asr_service import RealtimeASRService
 from class_copilot.services.doubao_asr_service import DoubaoRealtimeASRService
+from class_copilot.services.qwen_omni_asr_service import QwenOmniRealtimeASRService
 from class_copilot.services.llm_service import LLMService
 from class_copilot.services.question_detector import QuestionDetector
 from class_copilot.services.refinement_service import RefinementService
@@ -90,6 +91,8 @@ class SessionManager:
         """根据配置创建实时 ASR 服务"""
         if settings.asr_provider == "doubao":
             return DoubaoRealtimeASRService()
+        if settings.asr_provider == "qwen_omni":
+            return QwenOmniRealtimeASRService()
         return RealtimeASRService()
 
     @staticmethod

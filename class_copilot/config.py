@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     auto_answer_model: str = Field(default="qwen3.5-flash", description="自动回答使用的模型 (fast/quality)")
 
     # ASR 提供商选择
-    asr_provider: Literal["dashscope", "doubao"] = Field(
+    asr_provider: Literal["dashscope", "doubao", "qwen_omni"] = Field(
         default="dashscope", description="实时ASR提供商"
     )
     refinement_provider: Literal["dashscope", "doubao"] = Field(
