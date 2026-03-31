@@ -332,6 +332,19 @@ class SessionManager:
                 # 连接正常时重置计数
                 reconnect_attempts = 0
 
+                # 检查是否需要轮换会话（长时间运行保护）
+                if hasattr(self.asr_service, 'needs_rotation') and self.asr_service.needs_rotation:
+                    asr_logger.info("ASR 会话达到轮换时间，开始轮换...")
+                    await self._broadcast("notification", {
+                        "type": "info",
+                        "message": "正在刷新语音连接以保持稳定性...",
+                    })
+                    try:
+                        await self.asr_service.rotate_session()
+                    except Exception as e:
+                        asr_logger.error("ASR 会话轮换异常: {}", e)
+                    continue
+
                 try:
                     audio_data = await asyncio.wait_for(
                         self.audio_service.audio_queue.get(), timeout=1.0

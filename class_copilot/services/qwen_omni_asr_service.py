@@ -26,8 +26,17 @@ from class_copilot.config import settings
 from class_copilot.logger import asr_logger
 
 
-def _build_asr_instructions(language: str = "zh", hot_words: str = "") -> str:
-    """构建 Qwen3.5-Omni-Realtime 的 ASR 转写系统提示词 (XML 结构)"""
+# 轮换时保留的最近转写条数上限
+_RECENT_FINALS_LIMIT = 30
+
+
+def _build_asr_instructions(language: str = "zh", hot_words: str = "",
+                            prior_context: str = "") -> str:
+    """构建 Qwen3.5-Omni-Realtime 的 ASR 转写系统提示词 (XML 结构)
+
+    Args:
+        prior_context: 会话轮换时注入的前文转写内容，使模型保持上下文连贯。
+    """
 
     lang_desc = {
         "zh": "中文（普通话）",
@@ -47,7 +56,7 @@ def _build_asr_instructions(language: str = "zh", hot_words: str = "") -> str:
   </words>
 </hot_words>"""
 
-    return f"""<role>
+    instructions = """<role>
   <identity>你是一个专业的课堂实时语音转写助手。</identity>
   <task>你的唯一任务是将麦克风输入的音频流精准地转录为文字，不做任何其他回应。</task>
 </role>
@@ -71,7 +80,23 @@ def _build_asr_instructions(language: str = "zh", hot_words: str = "") -> str:
 
 <output_format>
   <instruction>仅输出转录文本，不添加任何解释、翻译、总结或额外内容。</instruction>
-</output_format>"""
+</output_format>{prior_section}"""
+
+    # 会话轮换时注入前文转写，帮助模型衔接上下文
+    prior_section = ""
+    if prior_context and prior_context.strip():
+        prior_section = f"""
+
+<prior_transcript>
+  <description>以下是本次课堂此前的转写内容（因技术原因进行了连接刷新）。请基于这些上下文继续转写，保持内容连贯。不要重复输出以下内容。</description>
+  <text>{prior_context}</text>
+</prior_transcript>"""
+
+    return instructions.format(
+        lang_desc=lang_desc,
+        hot_words_section=hot_words_section,
+        prior_section=prior_section,
+    )
 
 
 class _QwenOmniASRCallback(OmniRealtimeCallback):
@@ -92,6 +117,8 @@ class _QwenOmniASRCallback(OmniRealtimeCallback):
         # 计时：记录首条文本输出的延迟
         self._start_ts: float = 0
         self._first_text_logged = False
+        # 最近的 final 转写文本，用于会话轮换时注入上下文
+        self._recent_finals: list[str] = []
 
     def _notify_disconnect(self, error_code=None):
         if self._on_disconnect:
@@ -152,12 +179,14 @@ class _QwenOmniASRCallback(OmniRealtimeCallback):
                 full_text = event.get("text", "") or self._response_text_buf
                 if full_text.strip():
                     self._emit(full_text, True)
+                    self._remember_final(full_text)
                 self._response_text_buf = ""
 
             elif event_type == "response.audio_transcript.done":
                 full_text = event.get("transcript", "") or self._response_text_buf
                 if full_text.strip():
                     self._emit(full_text, True)
+                    self._remember_final(full_text)
                 self._response_text_buf = ""
 
             elif event_type == "response.done":
@@ -198,9 +227,31 @@ class _QwenOmniASRCallback(OmniRealtimeCallback):
         except Exception as e:
             asr_logger.error("处理 Omni ASR 事件异常: {}", e)
 
+    def _remember_final(self, text: str):
+        """记住最近的 final 转写文本（环形缓冲）"""
+        self._recent_finals.append(text.strip())
+        if len(self._recent_finals) > _RECENT_FINALS_LIMIT:
+            self._recent_finals = self._recent_finals[-_RECENT_FINALS_LIMIT:]
+
+    def get_recent_context(self) -> str:
+        """返回最近转写的拼接文本，用于会话轮换时注入提示词"""
+        return "".join(self._recent_finals)
+
 
 class QwenOmniRealtimeASRService:
-    """实时 ASR 管理（qwen3.5-omni OmniRealtime WebSocket）"""
+    """实时 ASR 管理（qwen3.5-omni OmniRealtime WebSocket）
+
+    Qwen-Omni-Realtime 存在两项硬限制：
+      1. 单次 WebSocket 会话最长 120 分钟
+      2. 上下文上限 262,144 tokens（输入 max ~196,608）
+    音频以 ~25 token/s 速率消耗上下文，约 131 分钟就会撞上限。
+    因此需要定期轮换会话（rotate），在 context 膨胀前主动重连。
+    """
+
+    # 默认会话轮换间隔（秒）——
+    # 实测 900s ≈ 150K tokens，~167 tok/s，约 20 分钟撞上 196K 输入上限。
+    # 设为 12 分钟 (720s)，在 context 膨胀到危险区之前轮换。
+    SESSION_ROTATE_INTERVAL = 12 * 60
 
     def __init__(self):
         self._conversation: OmniRealtimeConversation | None = None
@@ -209,6 +260,13 @@ class QwenOmniRealtimeASRService:
         self._running = False
         self._disconnected = False
         self._last_error_code: int | None = None
+        # 缓存 start() 参数，用于轮换时重建
+        self._hot_words: str = ""
+        self._language: str = "zh"
+        # 会话启动时间，用于判断是否需要轮换
+        self._session_started_at: float = 0
+        # 轮换锁，防止并发轮换
+        self._rotating = False
 
     async def pre_connect(self):
         """预连接 WebSocket（可在准备热词等操作的同时并行调用以减少启动延迟）"""
@@ -228,8 +286,13 @@ class QwenOmniRealtimeASRService:
         t1 = time.monotonic()
         asr_logger.info("Omni ASR connect() 耗时: {:.2f}s", t1 - t0)
 
-    async def start(self, hot_words: str = "", language: str = "zh"):
-        """启动实时 ASR（若未调用 pre_connect 则内部自动连接）"""
+    async def start(self, hot_words: str = "", language: str = "zh",
+                    prior_context: str = ""):
+        """启动实时 ASR（若未调用 pre_connect 则内部自动连接）
+
+        Args:
+            prior_context: 会话轮换时传入的前文转写，会注入到 instructions 中。
+        """
         if self._running:
             asr_logger.warning("Omni ASR 已在运行中")
             return
@@ -240,7 +303,8 @@ class QwenOmniRealtimeASRService:
         t1 = time.monotonic()
 
         # 构建转写引导提示词
-        instructions = _build_asr_instructions(language=language, hot_words=hot_words)
+        instructions = _build_asr_instructions(
+            language=language, hot_words=hot_words, prior_context=prior_context)
 
         # 手动构建 session.update 消息，绕过 SDK 的 update_session()
         # SDK 总会将 voice 字段发送为 null 或具体值，而 omni-realtime 模型
@@ -275,7 +339,10 @@ class QwenOmniRealtimeASRService:
         self._running = True
         self._disconnected = False
         self._last_error_code = None
-        asr_logger.info("Omni 实时 ASR 已启动, 模型={}, 语言={}", model, language)
+        self._hot_words = hot_words
+        self._language = language
+        self._session_started_at = time.monotonic()
+        asr_logger.info("Omni 实时 ASR 已启动, 模型={}, 语言={}", settings.asr_model, language)
 
     async def send_audio(self, audio_bytes: bytes):
         """发送 PCM 音频帧（base64 编码后发送）"""
@@ -323,3 +390,57 @@ class QwenOmniRealtimeASRService:
     def is_permanent_error(self) -> bool:
         """是否为不可恢复的错误（如认证失败）"""
         return self._last_error_code in (401, 403)
+
+    @property
+    def needs_rotation(self) -> bool:
+        """当前会话是否需要轮换（接近 context / 时间上限）"""
+        if not self._running or not self._session_started_at:
+            return False
+        elapsed = time.monotonic() - self._session_started_at
+        return elapsed >= self.SESSION_ROTATE_INTERVAL
+
+    async def rotate_session(self):
+        """轮换 WebSocket 会话：关闭旧连接 → 新建连接 → 重新配置
+
+        在 VAD 静音间隙调用，丢失极少量音频（<1s），前端基本无感。
+        旧 callback 中的最近转写内容会被注入新会话的 instructions，保持上下文连续。
+        """
+        if self._rotating or not self._running:
+            return
+        self._rotating = True
+        try:
+            elapsed = time.monotonic() - self._session_started_at
+            asr_logger.info("Omni ASR 会话轮换开始 (已运行 {:.0f}s)", elapsed)
+
+            # 1) 从旧 callback 提取最近转写文本
+            prior_context = ""
+            if self._callback:
+                prior_context = self._callback.get_recent_context()
+                asr_logger.info("轮换携带前文上下文: {}字", len(prior_context))
+
+            # 2) 关闭旧连接
+            old_conv = self._conversation
+            self._conversation = None
+            self._running = False
+            if old_conv:
+                try:
+                    await asyncio.to_thread(old_conv.close)
+                except Exception:
+                    pass
+
+            # 3) 重新连接 + 配置（注入前文上下文）
+            self._disconnected = False
+            self._last_error_code = None
+            await self.pre_connect()
+            await self.start(
+                hot_words=self._hot_words,
+                language=self._language,
+                prior_context=prior_context,
+            )
+
+            asr_logger.info("Omni ASR 会话轮换完成")
+        except Exception as e:
+            asr_logger.error("Omni ASR 会话轮换失败: {}", e)
+            self._disconnected = True
+        finally:
+            self._rotating = False
