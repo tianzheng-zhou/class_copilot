@@ -435,6 +435,10 @@ async def get_runtime_settings():
         "oss_endpoint": settings.oss_endpoint,
         "oss_upload_prefix": settings.oss_upload_prefix,
         "oss_url_expiry_seconds": settings.oss_url_expiry_seconds,
+        "vad_threshold": settings.vad_threshold,
+        "vad_prefix_padding_ms": settings.vad_prefix_padding_ms,
+        "vad_silence_duration_ms": settings.vad_silence_duration_ms,
+        "asr_session_rotate_minutes": settings.asr_session_rotate_minutes,
     }
 
 

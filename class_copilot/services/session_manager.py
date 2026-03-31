@@ -277,9 +277,16 @@ class SessionManager:
             await self._broadcast("notification", {"type": "info", "message": "正在启动课后精修..."})
             asyncio.create_task(self._start_post_refinement())
         elif settings.enable_refinement and settings.refinement_strategy == "periodic":
-            # 课中定时精修：停止时提交最后一段录音
-            refinement_logger.info("课中定时精修 - 提交最终录音段: session={}", self.current_session_id)
-            asyncio.create_task(self._start_post_refinement())
+            # 课中定时精修：停止时仅提交最后一段尚未精修的录音（前面的已由定时循环处理）
+            last_path = recording_info.get("file_path", "") if recording_info else ""
+            last_rec_id = self.current_recording_id
+            if last_path and Path(last_path).exists() and last_rec_id:
+                refinement_logger.info("课中定时精修 - 提交最终录音段: session={}", self.current_session_id)
+                asyncio.create_task(self._refine_single_recording(
+                    self.current_session_id, last_path, last_rec_id,
+                ))
+            else:
+                refinement_logger.info("课中定时精修 - 无最终录音段需精修")
         elif settings.enable_refinement:
             refinement_logger.info("精修已启用但策略为 '{}', 不自动触发", settings.refinement_strategy)
         else:
@@ -673,7 +680,14 @@ class SessionManager:
                 )
                 recordings = result.scalars().all()
 
-            paths = [r.file_path for r in recordings if Path(r.file_path).exists()]
+            # 构建 path → recording_id 映射，并过滤出实际存在的文件
+            path_to_rec_id: dict[str, str] = {}
+            paths = []
+            for r in recordings:
+                if Path(r.file_path).exists():
+                    paths.append(r.file_path)
+                    path_to_rec_id[r.file_path] = r.id
+
             if not paths:
                 refinement_logger.warning("无可用录音文件")
                 await self._broadcast("refinement_status", {"status": "failed", "session_id": session_id, "message": "无可用录音文件"})
@@ -698,7 +712,8 @@ class SessionManager:
                 # 保存精修结果到数据库
                 if result:
                     try:
-                        await self._save_refined_results(sid, result)
+                        rec_id = path_to_rec_id.get(path)
+                        await self._save_refined_results(sid, result, recording_id=rec_id)
                         saved_count += len(result)
                     except Exception as e:
                         refinement_logger.error("保存精修结果失败 ({}): {}", path, e, exc_info=True)
@@ -749,27 +764,48 @@ class SessionManager:
         else:
             refinement_logger.info("课后精修完成: session={}, 精修片段数={}", session_id, saved_count)
 
-    async def _save_refined_results(self, session_id: str, refined_segments: list[dict]):
-        """将精修结果保存到对应的 Transcription 记录"""
+    async def _save_refined_results(self, session_id: str, refined_segments: list[dict],
+                                     recording_id: str | None = None):
+        """将精修结果保存到对应的 Transcription 记录
+
+        Args:
+            recording_id: 指定录音 ID 时，仅匹配该录音的转写记录（定时精修场景）。
+        """
         if not refined_segments:
             return
 
         async with async_session() as db:
-            result = await db.execute(
+            # 构建查询——按 recording_id 缩窄范围（定时精修）或全会话（课后精修）
+            q = (
                 select(Transcription)
                 .where(Transcription.session_id == session_id, Transcription.is_final == True)
-                .order_by(Transcription.start_time)
             )
+            if recording_id:
+                q = q.where(Transcription.recording_id == recording_id)
+            # 只匹配尚未精修的记录，避免重复覆盖
+            q = q.where(Transcription.refinement_status != "refined")
+            q = q.order_by(Transcription.sequence)
+            result = await db.execute(q)
             originals = result.scalars().all()
 
             if not originals:
-                # 无原始记录 → 直接创建精修记录
+                # 无可匹配的原始记录 → 直接创建精修记录
+                # 先获取当前最大 sequence
+                max_seq_q = await db.execute(
+                    select(Transcription.sequence)
+                    .where(Transcription.session_id == session_id)
+                    .order_by(Transcription.sequence.desc())
+                    .limit(1)
+                )
+                max_seq = max_seq_q.scalar() or 0
                 for i, seg in enumerate(refined_segments):
+                    max_seq += 1
                     trans = Transcription(
                         session_id=session_id,
+                        recording_id=recording_id,
                         start_time=seg["start_time"],
                         end_time=seg["end_time"],
-                        sequence=i + 1,
+                        sequence=max_seq,
                         realtime_text="",
                         refined_text=seg["text"],
                         is_final=True,
@@ -780,30 +816,41 @@ class SessionManager:
                 await db.commit()
                 return
 
-            # 贪心 1:1 匹配：每个精修片段只分配给重叠最大的一个原始记录
-            # 构建所有 (overlap, seg_idx, orig) 候选对
-            matches = []
-            for seg_idx, seg in enumerate(refined_segments):
-                for orig in originals:
-                    overlap_start = max(seg["start_time"], orig.start_time)
-                    overlap_end = min(seg["end_time"], orig.end_time)
-                    overlap = max(0, overlap_end - overlap_start)
-                    if overlap > 0:
-                        matches.append((overlap, seg_idx, orig))
-
-            # 按重叠量降序，贪心分配
-            matches.sort(key=lambda x: x[0], reverse=True)
+            # 尝试时间重叠匹配（仅当原始记录有有效时间戳时）
+            has_timestamps = any(o.start_time != 0 or o.end_time != 0 for o in originals)
             used_seg_idxs: set[int] = set()
             used_orig_ids: set[str] = set()
 
-            for overlap, seg_idx, orig in matches:
-                if seg_idx in used_seg_idxs or orig.id in used_orig_ids:
-                    continue
-                orig.refined_text = refined_segments[seg_idx]["text"]
-                orig.refinement_status = "refined"
-                orig.refined_at = datetime.now()
-                used_seg_idxs.add(seg_idx)
-                used_orig_ids.add(orig.id)
+            if has_timestamps:
+                matches = []
+                for seg_idx, seg in enumerate(refined_segments):
+                    for orig in originals:
+                        overlap_start = max(seg["start_time"], orig.start_time)
+                        overlap_end = min(seg["end_time"], orig.end_time)
+                        overlap = max(0, overlap_end - overlap_start)
+                        if overlap > 0:
+                            matches.append((overlap, seg_idx, orig))
+
+                matches.sort(key=lambda x: x[0], reverse=True)
+                for overlap, seg_idx, orig in matches:
+                    if seg_idx in used_seg_idxs or orig.id in used_orig_ids:
+                        continue
+                    orig.refined_text = refined_segments[seg_idx]["text"]
+                    orig.refinement_status = "refined"
+                    orig.refined_at = datetime.now()
+                    used_seg_idxs.add(seg_idx)
+                    used_orig_ids.add(orig.id)
+
+            # 回退策略（无时间戳 或 时间匹配一个都没匹配上）—— 按顺序匹配
+            if not used_seg_idxs:
+                for i, orig in enumerate(originals):
+                    if i >= len(refined_segments):
+                        break
+                    orig.refined_text = refined_segments[i]["text"]
+                    orig.refinement_status = "refined"
+                    orig.refined_at = datetime.now()
+                    used_seg_idxs.add(i)
+                    used_orig_ids.add(orig.id)
 
             # 未匹配到原始记录的精修片段 → 创建新记录
             max_seq = max(o.sequence for o in originals) if originals else 0
@@ -812,6 +859,7 @@ class SessionManager:
                     max_seq += 1
                     trans = Transcription(
                         session_id=session_id,
+                        recording_id=recording_id,
                         start_time=seg["start_time"],
                         end_time=seg["end_time"],
                         sequence=max_seq,
@@ -825,7 +873,8 @@ class SessionManager:
 
             await db.commit()
 
-        refinement_logger.debug("已保存精修结果: session={}, 精修片段数={}", session_id, len(refined_segments))
+        refinement_logger.debug("已保存精修结果: session={}, 精修片段数={}, recording={}",
+                                session_id, len(refined_segments), recording_id or "all")
 
     async def manual_refine(self):
         """手动触发精修"""
@@ -909,10 +958,11 @@ class SessionManager:
         )
 
         # 3. 将旧录音提交后台精修
-        if old_path and Path(old_path).exists():
-            asyncio.create_task(self._refine_single_recording(session_id, old_path))
+        if old_path and Path(old_path).exists() and old_recording_id:
+            asyncio.create_task(self._refine_single_recording(session_id, old_path, old_recording_id))
 
-    async def _refine_single_recording(self, session_id: str, recording_path: str):
+    async def _refine_single_recording(self, session_id: str, recording_path: str,
+                                       recording_id: str | None = None):
         """对单个录音文件执行精修并保存结果"""
         refinement_logger.info("提交定时精修: {}", Path(recording_path).name)
         await self._broadcast("refinement_status", {
@@ -935,7 +985,7 @@ class SessionManager:
             )
 
             if segments:
-                await self._save_refined_results(session_id, segments)
+                await self._save_refined_results(session_id, segments, recording_id=recording_id)
                 refinement_logger.info("定时精修完成: {} 个片段, file={}", len(segments), Path(recording_path).name)
             else:
                 refinement_logger.warning("定时精修无结果: {}", Path(recording_path).name)
@@ -1116,6 +1166,12 @@ class SessionManager:
         # 继续监听：启动录音和ASR
         self.asr_service = self._create_asr_service()
         self.refinement_service = self._create_refinement_service()
+
+        # 尽早启动 ASR 预连接，与后续 DB 操作并行
+        pre_connect_task = None
+        if hasattr(self.asr_service, 'pre_connect'):
+            pre_connect_task = asyncio.create_task(self.asr_service.pre_connect())
+
         self.status = "listening"
         self.is_listening = True
         self._recording_started_at = time.time()
@@ -1140,6 +1196,13 @@ class SessionManager:
             db.add(recording)
             await db.commit()
             self.current_recording_id = recording.id
+
+        # 等待预连接完成
+        if pre_connect_task:
+            try:
+                await pre_connect_task
+            except Exception as e:
+                logger.error("ASR 预连接失败 (recall): {}", e)
 
         try:
             await self.asr_service.start(hot_words=hot_words, language=settings.language)

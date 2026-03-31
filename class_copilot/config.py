@@ -71,6 +71,24 @@ class Settings(BaseSettings):
     sample_rate: int = Field(default=16000, description="采样率")
     channels: int = Field(default=1, description="声道数")
 
+    # Omni Realtime VAD / 会话参数
+    vad_threshold: float = Field(
+        default=0.3,
+        description="VAD 语音检测灵敏度 (0-1)。越低越灵敏，嘈杂环境可调高到 0.4-0.5",
+    )
+    vad_prefix_padding_ms: int = Field(
+        default=500,
+        description="VAD 在检测到语音前多保留的音频毫秒数，防止句首截断",
+    )
+    vad_silence_duration_ms: int = Field(
+        default=1500,
+        description="VAD 判定语音结束所需的静音毫秒数。连续讲话场景可调大到 2000-3000",
+    )
+    asr_session_rotate_minutes: float = Field(
+        default=12.0,
+        description="Omni Realtime 会话轮换间隔(分钟)。越大上下文越多但质量可能下降",
+    )
+
     # 功能开关
     language: Literal["zh", "en"] = Field(default="zh", description="授课语言")
     enable_brief_answer: bool = Field(default=True, description="启用简洁版答案")

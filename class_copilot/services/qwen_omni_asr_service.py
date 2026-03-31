@@ -63,13 +63,17 @@ def _build_asr_instructions(language: str = "zh", hot_words: str = "",
 
 <transcription_rules>
   <language>{lang_desc}</language>
-  <guidelines>
-    <rule>严格按照说话人的原话进行逐字转录，保持原始表述。</rule>
+  <critical_rules>
+    <rule>你必须完整转录听到的每一句话，不得省略、跳过或概括任何内容。</rule>
+    <rule>严格按照说话人的原话进行逐字转录，保持原始表述。即使听起来不完整或像在自言自语，也必须如实输出。</rule>
+    <rule>禁止输出你没有从音频中听到的内容。不要猜测、补充或编造。</rule>
+  </critical_rules>
+  <formatting_rules>
     <rule>正确使用标点符号，句子结束时添加句号、问号或感叹号。</rule>
     <rule>对于专业术语、人名、地名等，优先使用通用的正确拼写。</rule>
-    <rule>保留口语化表达和语气词（如"嗯"、"那个"等），保持转录的真实性。</rule>
+    <rule>保留口语化表达和语气词（如 "嗯"、"那个"、"uh"、"so" 等），保持转录的真实性。</rule>
     <rule>数字、公式、单位等按照学术规范转写。</rule>
-  </guidelines>
+  </formatting_rules>
 </transcription_rules>
 
 <context>
@@ -79,7 +83,10 @@ def _build_asr_instructions(language: str = "zh", hot_words: str = "",
 </context>{hot_words_section}
 
 <output_format>
-  <instruction>仅输出转录文本，不添加任何解释、翻译、总结或额外内容。</instruction>
+  <rules>
+    <rule>仅输出转录文本，不添加任何解释、翻译、总结或额外内容。</rule>
+    <rule>每次输出应包含你从当前音频片段中听到的所有内容，不要遗漏。</rule>
+  </rules>
 </output_format>{prior_section}"""
 
     # 会话轮换时注入前文转写，帮助模型衔接上下文
@@ -248,10 +255,10 @@ class QwenOmniRealtimeASRService:
     因此需要定期轮换会话（rotate），在 context 膨胀前主动重连。
     """
 
-    # 默认会话轮换间隔（秒）——
-    # 实测 900s ≈ 150K tokens，~167 tok/s，约 20 分钟撞上 196K 输入上限。
-    # 设为 12 分钟 (720s)，在 context 膨胀到危险区之前轮换。
-    SESSION_ROTATE_INTERVAL = 12 * 60
+    # 轮换间隔从 config 读取，动态属性以支持运行时调整
+    @property
+    def _rotate_interval(self) -> float:
+        return settings.asr_session_rotate_minutes * 60
 
     def __init__(self):
         self._conversation: OmniRealtimeConversation | None = None
@@ -313,11 +320,13 @@ class QwenOmniRealtimeASRService:
             "modalities": ["text"],
             "input_audio_format": "pcm",
             "instructions": instructions,
+            # 显式关闭旁路转写通道，避免额外消耗 context tokens
+            "input_audio_transcription": None,
             "turn_detection": {
                 "type": "server_vad",
-                "threshold": 0.2,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 800,
+                "threshold": settings.vad_threshold,
+                "prefix_padding_ms": settings.vad_prefix_padding_ms,
+                "silence_duration_ms": settings.vad_silence_duration_ms,
             },
         }
         session_update_msg = json.dumps({
@@ -397,7 +406,7 @@ class QwenOmniRealtimeASRService:
         if not self._running or not self._session_started_at:
             return False
         elapsed = time.monotonic() - self._session_started_at
-        return elapsed >= self.SESSION_ROTATE_INTERVAL
+        return elapsed >= self._rotate_interval
 
     async def rotate_session(self):
         """轮换 WebSocket 会话：关闭旧连接 → 新建连接 → 重新配置

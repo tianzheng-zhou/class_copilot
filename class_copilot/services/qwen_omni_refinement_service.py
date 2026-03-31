@@ -19,6 +19,10 @@ from openai import AsyncOpenAI
 
 from class_copilot.config import settings
 from class_copilot.logger import refinement_logger
+from class_copilot.services.oss_service import OSSService
+
+# data-uri 有 10MB 上限；原始文件超过此阈值时改用 OSS URL
+_DATA_URI_MAX_RAW_BYTES = 7 * 1024 * 1024  # 7MB raw → ~9.3MB base64，留足余量
 
 
 def _build_refinement_prompt(language: str = "zh", hot_words: str = "") -> str:
@@ -65,17 +69,31 @@ def _build_refinement_prompt(language: str = "zh", hot_words: str = "") -> str:
 </context>{hot_words_section}
 
 <output_format>
-  <instruction>使用带时间戳的字幕格式输出转录文本。每段文字前标注起止时间，格式为 [HH:MM:SS,mmm --> HH:MM:SS,mmm]。
-例如：
-[00:00:01,200 --> 00:00:05,800] 今天我们来讲一下线性代数的基本概念。
-[00:00:06,100 --> 00:00:12,300] 首先，什么是向量空间？
-不要添加任何解释、翻译、总结或额外内容。</instruction>
+  <format_type>inline_timestamped_subtitle</format_type>
+  <template>[HH:MM:SS,mmm --> HH:MM:SS,mmm] 转录文本</template>
+  <rules>
+    <rule>每段转录文本与其时间戳必须在同一行。</rule>
+    <rule>时间戳格式严格为 [HH:MM:SS,mmm --> HH:MM:SS,mmm]，紧跟一个空格，然后是对应的转录文本。</rule>
+    <rule>禁止将时间戳和文本分成多行输出。</rule>
+    <rule>禁止输出空行或仅包含标点符号的行。</rule>
+    <rule>不要添加任何解释、翻译、总结或额外内容，仅输出转录结果。</rule>
+  </rules>
+  <examples>
+    <correct>[00:00:01,200 --> 00:00:05,800] 今天我们来讲一下线性代数的基本概念。</correct>
+    <correct>[00:00:06,100 --> 00:00:12,300] 首先，什么是向量空间？</correct>
+    <wrong>[00:00:01,200 --> 00:00:05,800]\n今天我们来讲一下线性代数的基本概念。</wrong>
+  </examples>
 </output_format>"""
 
 
 # 匹配 [HH:MM:SS,mmm --> HH:MM:SS,mmm] 文本  或  [MM:SS,mmm --> MM:SS,mmm] 文本
 _TS_PATTERN = re.compile(
     r'\[(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3})\]\s*(.+)',
+)
+
+# 仅时间戳行（文本在下一行）—— 模型偶尔将时间戳和文本分两行输出
+_TS_ONLY_PATTERN = re.compile(
+    r'\[(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3})\]\s*$',
 )
 
 
@@ -91,25 +109,52 @@ def _ts_to_seconds(ts: str) -> float:
 
 
 def _parse_timestamped_text(text: str) -> list[dict]:
-    """解析模型输出的带时间戳字幕格式，回退到纯文本"""
+    """解析模型输出的带时间戳字幕格式，支持多行格式回退"""
     segments = []
+    pending_ts: tuple[float, float] | None = None  # 暂存仅时间戳行的起止时间
+
     for line in text.strip().split("\n"):
         line = line.strip()
         if not line:
             continue
+
+        # 1) 完整格式：[ts --> ts] 文本
         m = _TS_PATTERN.match(line)
         if m:
+            pending_ts = None
             segments.append({
                 "text": m.group(3).strip(),
                 "start_time": _ts_to_seconds(m.group(1)),
                 "end_time": _ts_to_seconds(m.group(2)),
             })
-        elif line:
-            # 没有时间戳的行，追加到上一个片段或创建新片段
-            if segments and segments[-1]["end_time"] == 0:
-                segments[-1]["text"] += "\n" + line
-            else:
-                segments.append({"text": line, "start_time": 0, "end_time": 0})
+            continue
+
+        # 2) 仅时间戳行（文本在下一行）
+        m2 = _TS_ONLY_PATTERN.match(line)
+        if m2:
+            pending_ts = (_ts_to_seconds(m2.group(1)), _ts_to_seconds(m2.group(2)))
+            continue
+
+        # 3) 纯文本行
+        # 跳过仅含方括号等无意义残留
+        clean = line.strip('[]').strip()
+        if not clean:
+            pending_ts = None
+            continue
+
+        if pending_ts:
+            # 与上一行暂存的时间戳配对
+            segments.append({
+                "text": clean,
+                "start_time": pending_ts[0],
+                "end_time": pending_ts[1],
+            })
+            pending_ts = None
+        elif segments and segments[-1]["end_time"] == 0:
+            segments[-1]["text"] += "\n" + clean
+        else:
+            segments.append({"text": clean, "start_time": 0, "end_time": 0})
+
     return segments
 
 
@@ -120,6 +165,7 @@ class QwenOmniRefinementService:
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._monthly_usage_seconds: float = 0.0
         self._client: AsyncOpenAI | None = None
+        self._oss: OSSService = OSSService()
 
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
@@ -155,12 +201,37 @@ class QwenOmniRefinementService:
         try:
             refinement_logger.info("开始 Omni 精修转写: {}, model={}", audio_file_path, model)
 
-            # 读取并 base64 编码
-            raw = await asyncio.to_thread(file_path.read_bytes)
-            audio_b64 = base64.b64encode(raw).decode("ascii")
-
+            file_size = file_path.stat().st_size
             system_prompt = _build_refinement_prompt(language=language, hot_words=hot_words)
             client = self._get_client()
+
+            # 超过 7MB 使用 OSS URL，否则使用 data-uri（避免 10MB data-uri 限制）
+            if file_size > _DATA_URI_MAX_RAW_BYTES:
+                refinement_logger.info(
+                    "文件 {:.1f}MB 超过 data-uri 阈值，使用 OSS URL",
+                    file_size / 1024 / 1024,
+                )
+                oss_url = await self._oss.upload_file(str(file_path))
+                if not oss_url:
+                    refinement_logger.error("OSS 上传失败，无法进行精修转写")
+                    return None
+                audio_content = {
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": oss_url,
+                        "format": audio_format,
+                    },
+                }
+            else:
+                raw = await asyncio.to_thread(file_path.read_bytes)
+                audio_b64 = base64.b64encode(raw).decode("ascii")
+                audio_content = {
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": f"data:;base64,{audio_b64}",
+                        "format": audio_format,
+                    },
+                }
 
             # 流式请求
             stream = await client.chat.completions.create(
@@ -170,13 +241,7 @@ class QwenOmniRefinementService:
                     {
                         "role": "user",
                         "content": [
-                            {
-                                "type": "input_audio",
-                                "input_audio": {
-                                    "data": f"data:;base64,{audio_b64}",
-                                    "format": audio_format,
-                                },
-                            },
+                            audio_content,
                             {"type": "text", "text": "请转录这段音频。"},
                         ],
                     },
@@ -205,7 +270,6 @@ class QwenOmniRefinementService:
             )
 
             # 更新用量估算（基于 128kbps MP3）
-            file_size = file_path.stat().st_size
             estimated_duration = file_size / (128 * 1024 / 8)
             self._monthly_usage_seconds += estimated_duration
 
@@ -247,12 +311,15 @@ class QwenOmniRefinementService:
         language: str = "zh",
         max_retries: int = 3,
     ) -> list[dict] | None:
-        """带重试的转写"""
+        """带重试的转写（不对 400 等客户端错误重试）"""
         delays = [10, 30, 60]
         for attempt in range(max_retries):
-            result = await self.transcribe_file(audio_path, hot_words, language)
-            if result is not None:
-                return result
+            try:
+                result = await self.transcribe_file(audio_path, hot_words, language)
+                if result is not None:
+                    return result
+            except Exception:
+                pass  # transcribe_file 内部已记录日志
             if attempt < max_retries - 1:
                 delay = delays[attempt]
                 refinement_logger.warning("Omni 精修转写失败，{}秒后重试 ({}/{})", delay, attempt + 1, max_retries)
