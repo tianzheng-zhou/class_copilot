@@ -88,6 +88,10 @@ class Settings(BaseSettings):
         default=12.0,
         description="Omni Realtime 会话轮换间隔(分钟)。越大上下文越多但质量可能下降",
     )
+    vad_max_segment_seconds: float = Field(
+        default=15.0,
+        description="最大语音段时长(秒)。超过此时间未收到转写结果时强制提交音频缓冲，防止长时间连续讲话导致内容丢失",
+    )
 
     # 功能开关
     language: Literal["zh", "en"] = Field(default="zh", description="授课语言")

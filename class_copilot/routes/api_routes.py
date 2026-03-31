@@ -439,6 +439,7 @@ async def get_runtime_settings():
         "vad_prefix_padding_ms": settings.vad_prefix_padding_ms,
         "vad_silence_duration_ms": settings.vad_silence_duration_ms,
         "asr_session_rotate_minutes": settings.asr_session_rotate_minutes,
+        "vad_max_segment_seconds": settings.vad_max_segment_seconds,
     }
 
 

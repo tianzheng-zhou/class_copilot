@@ -126,6 +126,8 @@ class _QwenOmniASRCallback(OmniRealtimeCallback):
         self._first_text_logged = False
         # 最近的 final 转写文本，用于会话轮换时注入上下文
         self._recent_finals: list[str] = []
+        # 最近一次 final 输出的时间戳，用于强制提交计时
+        self._last_final_at: float = 0
 
     def _notify_disconnect(self, error_code=None):
         if self._on_disconnect:
@@ -239,6 +241,7 @@ class _QwenOmniASRCallback(OmniRealtimeCallback):
         self._recent_finals.append(text.strip())
         if len(self._recent_finals) > _RECENT_FINALS_LIMIT:
             self._recent_finals = self._recent_finals[-_RECENT_FINALS_LIMIT:]
+        self._last_final_at = time.monotonic()
 
     def get_recent_context(self) -> str:
         """返回最近转写的拼接文本，用于会话轮换时注入提示词"""
@@ -399,6 +402,36 @@ class QwenOmniRealtimeASRService:
     def is_permanent_error(self) -> bool:
         """是否为不可恢复的错误（如认证失败）"""
         return self._last_error_code in (401, 403)
+
+    @property
+    def last_final_elapsed(self) -> float:
+        """距离上次 final 输出的秒数（用于强制提交判断）"""
+        if not self._callback or not self._callback._last_final_at:
+            return 0.0
+        return time.monotonic() - self._callback._last_final_at
+
+    async def force_commit(self):
+        """强制提交音频缓冲并触发转写
+
+        当教师持续讲话超过阈值仍未触发 VAD 时，主动发送
+        input_audio_buffer.commit + response.create 确保产出转写结果。
+        """
+        if not self._conversation or not self._running or self._disconnected:
+            return
+        try:
+            commit_msg = json.dumps({
+                "event_id": "event_" + uuid.uuid4().hex,
+                "type": "input_audio_buffer.commit",
+            })
+            create_msg = json.dumps({
+                "event_id": "event_" + uuid.uuid4().hex,
+                "type": "response.create",
+            })
+            await asyncio.to_thread(self._conversation.send_raw, commit_msg)
+            await asyncio.to_thread(self._conversation.send_raw, create_msg)
+            asr_logger.info("强制提交音频缓冲 (force_commit)")
+        except Exception as e:
+            asr_logger.warning("force_commit 异常: {}", e)
 
     @property
     def needs_rotation(self) -> bool:

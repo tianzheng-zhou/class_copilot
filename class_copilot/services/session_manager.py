@@ -302,7 +302,7 @@ class SessionManager:
     # ──────────── 音频→ASR 流 ────────────
 
     async def _feed_audio_to_asr(self):
-        """将录音数据发送到ASR，ASR断开时自动重连"""
+        """将录音数据发送到ASR，ASR断开时自动重连，长时间无输出时强制提交"""
         reconnect_attempts = 0
         max_reconnect_rounds = 3
         try:
@@ -351,6 +351,20 @@ class SessionManager:
                     except Exception as e:
                         asr_logger.error("ASR 会话轮换异常: {}", e)
                     continue
+
+                # 连续讲话保护：长时间未收到 final 结果时强制提交音频缓冲
+                max_seg = settings.vad_max_segment_seconds
+                if (max_seg > 0
+                        and hasattr(self.asr_service, 'last_final_elapsed')
+                        and hasattr(self.asr_service, 'force_commit')):
+                    elapsed = self.asr_service.last_final_elapsed
+                    if elapsed >= max_seg:
+                        asr_logger.info(
+                            "连续 {:.0f}s 未收到转写结果，强制提交音频缓冲", elapsed)
+                        try:
+                            await self.asr_service.force_commit()
+                        except Exception as e:
+                            asr_logger.warning("强制提交异常: {}", e)
 
                 try:
                     audio_data = await asyncio.wait_for(
