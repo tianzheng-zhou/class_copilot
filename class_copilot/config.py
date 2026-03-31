@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     asr_provider: Literal["dashscope", "doubao", "qwen_omni"] = Field(
         default="dashscope", description="实时ASR提供商"
     )
-    refinement_provider: Literal["dashscope", "doubao"] = Field(
+    refinement_provider: Literal["dashscope", "doubao", "qwen_omni"] = Field(
         default="dashscope", description="精修ASR提供商"
     )
 

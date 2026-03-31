@@ -427,6 +427,7 @@ async def get_runtime_settings():
         "asr_model": settings.asr_model,
         "asr_provider": settings.asr_provider,
         "refinement_provider": settings.refinement_provider,
+        "refined_asr_model": settings.refined_asr_model,
         "auto_answer_model": settings.auto_answer_model,
         "llm_model_fast": settings.llm_model_fast,
         "llm_model_quality": settings.llm_model_quality,

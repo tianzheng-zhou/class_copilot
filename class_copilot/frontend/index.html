@@ -180,25 +180,20 @@
                     <div class="settings-pane" data-settings-pane="asr">
                         <div class="form-group">
                             <label>实时语音识别（流式）</label>
-                            <select id="settingAsrProvider">
-                                <option value="dashscope">千问 ASR (qwen3-asr)</option>
-                                <option value="qwen_omni">千问 Omni (qwen3.5-omni)</option>
-                                <option value="doubao">豆包 (火山引擎)</option>
-                            </select>
-                            <small id="asrModelHint"></small>
-                        </div>
-                        <div class="form-group" id="asrModelGroup" style="display:none;">
-                            <label>Omni 模型选择</label>
                             <select id="settingAsrModel">
-                                <option value="qwen3.5-omni-flash-realtime">qwen3.5-omni-flash-realtime（速度快、成本低）</option>
-                                <option value="qwen3.5-omni-plus-realtime">qwen3.5-omni-plus-realtime（效果好）</option>
+                                <option value="dashscope:qwen3-asr-flash-realtime">千问 ASR Flash (qwen3-asr)</option>
+                                <option value="qwen_omni:qwen3.5-omni-flash-realtime">千问 Omni Flash (qwen3.5-omni) — 速度快</option>
+                                <option value="qwen_omni:qwen3.5-omni-plus-realtime">千问 Omni Plus (qwen3.5-omni) — 效果好</option>
+                                <option value="doubao:">豆包 (火山引擎)</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label>精修转写（非流式/离线）</label>
-                            <select id="settingRefinementProvider">
-                                <option value="dashscope">阿里千问 (DashScope)</option>
-                                <option value="doubao">豆包 (火山引擎)</option>
+                            <select id="settingRefinementModel">
+                                <option value="dashscope:qwen3-asr-flash-filetrans">千问 ASR Flash (离线转写)</option>
+                                <option value="qwen_omni:qwen3.5-omni-flash">千问 Omni Flash — 速度快</option>
+                                <option value="qwen_omni:qwen3.5-omni-plus">千问 Omni Plus — 效果好</option>
+                                <option value="doubao:">豆包 (火山引擎)</option>
                             </select>
                         </div>
                     </div>

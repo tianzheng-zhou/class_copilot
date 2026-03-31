@@ -22,6 +22,7 @@ from class_copilot.services.llm_service import LLMService
 from class_copilot.services.question_detector import QuestionDetector
 from class_copilot.services.refinement_service import RefinementService
 from class_copilot.services.doubao_refinement_service import DoubaoRefinementService
+from class_copilot.services.qwen_omni_refinement_service import QwenOmniRefinementService
 from class_copilot.services.notification_service import NotificationService
 from class_copilot.services.hotkey_service import HotkeyService
 from class_copilot.services.tray_service import update_icon_recording, set_main_loop
@@ -100,6 +101,8 @@ class SessionManager:
         """根据配置创建精修 ASR 服务"""
         if settings.refinement_provider == "doubao":
             return DoubaoRefinementService()
+        if settings.refinement_provider == "qwen_omni":
+            return QwenOmniRefinementService()
         return RefinementService()
 
     async def start_listening(self, course_name: str = "", auto_stop_seconds: int = 0, auto_stop_label: str = ""):
@@ -111,6 +114,11 @@ class SessionManager:
         # 根据当前配置(重新)创建 ASR / 精修服务，允许用户在会话间切换提供商
         self.asr_service = self._create_asr_service()
         self.refinement_service = self._create_refinement_service()
+
+        # 尽早启动 ASR 预连接（WebSocket 握手耗时较长），与后续 DB 操作并行
+        pre_connect_task = None
+        if hasattr(self.asr_service, 'pre_connect'):
+            pre_connect_task = asyncio.create_task(self.asr_service.pre_connect())
 
         self.current_course_name = course_name
         self.status = "listening"
@@ -150,7 +158,14 @@ class SessionManager:
             await db.commit()
             self.current_recording_id = recording.id
 
-        # 启动ASR
+        # 等待预连接完成（如果有的话）
+        if pre_connect_task:
+            try:
+                await pre_connect_task
+            except Exception as e:
+                logger.error("ASR 预连接失败: {}", e)
+
+        # 启动ASR（发送 session.update 配置）
         try:
             await self.asr_service.start(hot_words=hot_words, language=settings.language)
         except Exception as e:
