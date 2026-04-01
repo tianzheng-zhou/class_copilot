@@ -429,6 +429,9 @@ class QwenOmniRealtimeASRService:
             })
             await asyncio.to_thread(self._conversation.send_raw, commit_msg)
             await asyncio.to_thread(self._conversation.send_raw, create_msg)
+            # 重置计时，避免在 ASR 回复前重复触发
+            if self._callback:
+                self._callback._last_final_at = time.monotonic()
             asr_logger.info("强制提交音频缓冲 (force_commit)")
         except Exception as e:
             asr_logger.warning("force_commit 异常: {}", e)

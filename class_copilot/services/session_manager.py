@@ -444,13 +444,26 @@ class SessionManager:
         if is_final:
             self._transcription_seq += 1
 
-            # 保存到数据库
+            # 将相对时间转为绝对 epoch 时间
+            rel_start = result.get("start_time", 0)
+            rel_end = result.get("end_time", 0)
+            if self._recording_started_at and (rel_start or rel_end):
+                abs_start = self._recording_started_at + rel_start
+                abs_end = self._recording_started_at + rel_end
+            elif self._recording_started_at:
+                abs_start = time.time()
+                abs_end = abs_start
+            else:
+                abs_start = 0
+                abs_end = 0
+
+            # 保存到数据库（绝对 epoch 时间戳）
             async with async_session() as db:
                 trans = Transcription(
                     session_id=self.current_session_id,
                     recording_id=self.current_recording_id,
-                    start_time=result.get("start_time", 0),
-                    end_time=result.get("end_time", 0),
+                    start_time=abs_start,
+                    end_time=abs_end,
                     sequence=self._transcription_seq,
                     speaker_label=speaker_label,
                     speaker_role="teacher" if is_teacher else "unknown",
@@ -471,19 +484,7 @@ class SessionManager:
                 "speaker_label": speaker_label,
             })
 
-        # 广播到前端（将相对时间转为绝对 epoch 时间）
-        rel_start = result.get("start_time", 0)
-        rel_end = result.get("end_time", 0)
-        if self._recording_started_at and (rel_start or rel_end):
-            abs_start = self._recording_started_at + rel_start
-            abs_end = self._recording_started_at + rel_end
-        elif self._recording_started_at:
-            # ASR 未提供时间戳时，使用当前时间作为回退
-            abs_start = time.time()
-            abs_end = abs_start
-        else:
-            abs_start = 0
-            abs_end = 0
+        # 广播到前端（DB 已存绝对时间戳，直接使用）
         await self._broadcast("transcription", {
             "text": text,
             "is_final": is_final,
@@ -789,6 +790,33 @@ class SessionManager:
             return
 
         async with async_session() as db:
+            # 获取录音的 started_at，用于将精修时间戳（相对于音频文件）转为绝对 epoch
+            recording_epoch: float = 0
+            if recording_id:
+                rec_result = await db.execute(
+                    select(Recording).where(Recording.id == recording_id)
+                )
+                rec = rec_result.scalar_one_or_none()
+                if rec and rec.started_at:
+                    recording_epoch = time.mktime(rec.started_at.timetuple())
+            if not recording_epoch:
+                # 回退：使用会话开始时间
+                sess_result = await db.execute(
+                    select(Session).where(Session.id == session_id)
+                )
+                sess = sess_result.scalar_one_or_none()
+                if sess and sess.started_at:
+                    recording_epoch = time.mktime(sess.started_at.timetuple())
+
+            # 将精修片段时间戳转为绝对 epoch
+            abs_segments = []
+            for seg in refined_segments:
+                abs_seg = dict(seg)
+                if recording_epoch and (seg["start_time"] or seg["end_time"]):
+                    abs_seg["start_time"] = recording_epoch + seg["start_time"]
+                    abs_seg["end_time"] = recording_epoch + seg["end_time"]
+                abs_segments.append(abs_seg)
+
             # 构建查询——按 recording_id 缩窄范围（定时精修）或全会话（课后精修）
             q = (
                 select(Transcription)
@@ -812,7 +840,7 @@ class SessionManager:
                     .limit(1)
                 )
                 max_seq = max_seq_q.scalar() or 0
-                for i, seg in enumerate(refined_segments):
+                for i, seg in enumerate(abs_segments):
                     max_seq += 1
                     trans = Transcription(
                         session_id=session_id,
@@ -830,14 +858,14 @@ class SessionManager:
                 await db.commit()
                 return
 
-            # 尝试时间重叠匹配（仅当原始记录有有效时间戳时）
-            has_timestamps = any(o.start_time != 0 or o.end_time != 0 for o in originals)
+            # 尝试时间重叠匹配（原始记录和精修片段现在都是绝对 epoch 时间）
+            has_timestamps = any(o.start_time > 1e9 for o in originals)
             used_seg_idxs: set[int] = set()
             used_orig_ids: set[str] = set()
 
             if has_timestamps:
                 matches = []
-                for seg_idx, seg in enumerate(refined_segments):
+                for seg_idx, seg in enumerate(abs_segments):
                     for orig in originals:
                         overlap_start = max(seg["start_time"], orig.start_time)
                         overlap_end = min(seg["end_time"], orig.end_time)
@@ -849,7 +877,9 @@ class SessionManager:
                 for overlap, seg_idx, orig in matches:
                     if seg_idx in used_seg_idxs or orig.id in used_orig_ids:
                         continue
-                    orig.refined_text = refined_segments[seg_idx]["text"]
+                    orig.refined_text = abs_segments[seg_idx]["text"]
+                    orig.start_time = abs_segments[seg_idx]["start_time"]
+                    orig.end_time = abs_segments[seg_idx]["end_time"]
                     orig.refinement_status = "refined"
                     orig.refined_at = datetime.now()
                     used_seg_idxs.add(seg_idx)
@@ -858,9 +888,13 @@ class SessionManager:
             # 回退策略（无时间戳 或 时间匹配一个都没匹配上）—— 按顺序匹配
             if not used_seg_idxs:
                 for i, orig in enumerate(originals):
-                    if i >= len(refined_segments):
+                    if i >= len(abs_segments):
                         break
-                    orig.refined_text = refined_segments[i]["text"]
+                    orig.refined_text = abs_segments[i]["text"]
+                    # 用精修时间戳更新（原始 ASR 可能无时间戳）
+                    if abs_segments[i]["start_time"]:
+                        orig.start_time = abs_segments[i]["start_time"]
+                        orig.end_time = abs_segments[i]["end_time"]
                     orig.refinement_status = "refined"
                     orig.refined_at = datetime.now()
                     used_seg_idxs.add(i)
@@ -868,7 +902,7 @@ class SessionManager:
 
             # 未匹配到原始记录的精修片段 → 创建新记录
             max_seq = max(o.sequence for o in originals) if originals else 0
-            for seg_idx, seg in enumerate(refined_segments):
+            for seg_idx, seg in enumerate(abs_segments):
                 if seg_idx not in used_seg_idxs:
                     max_seq += 1
                     trans = Transcription(
@@ -1128,9 +1162,7 @@ class SessionManager:
         self.current_course_name = course_name
         self._transcription_seq = max_seq
 
-        # 广播 recall_data，前端接收后填充UI
-        session_epoch = time.mktime(session.started_at.timetuple()) if session.started_at else 0
-
+        # 广播 recall_data，前端接收后填充UI（DB 已存绝对 epoch 时间戳）
         recall_transcriptions = [{
             "text": t.best_text,
             "realtime_text": t.realtime_text,
@@ -1138,8 +1170,8 @@ class SessionManager:
             "is_final": True,
             "speaker_label": t.speaker_label,
             "is_teacher": t.is_teacher,
-            "start_time": (session_epoch + t.start_time) if session_epoch and t.start_time else t.start_time,
-            "end_time": (session_epoch + t.end_time) if session_epoch and t.end_time else t.end_time,
+            "start_time": t.start_time,
+            "end_time": t.end_time,
             "sentence_id": t.sequence,
         } for t in transcriptions]
 

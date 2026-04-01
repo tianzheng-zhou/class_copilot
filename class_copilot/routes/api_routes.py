@@ -2,7 +2,6 @@
 
 import asyncio
 import io
-import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -145,9 +144,6 @@ async def get_session_detail(session_id: str):
         )
         chat_messages = chat_result.scalars().all()
 
-        # 将相对时间转为绝对 epoch 时间（本地时间）
-        session_epoch = time.mktime(session.started_at.timetuple()) if session.started_at else 0
-
         return {
             "session": {
                 "id": session.id,
@@ -167,8 +163,8 @@ async def get_session_detail(session_id: str):
                 "speaker_label": t.speaker_label,
                 "is_teacher": t.is_teacher,
                 "refinement_status": t.refinement_status,
-                "start_time": (session_epoch + t.start_time) if session_epoch and t.start_time else t.start_time,
-                "end_time": (session_epoch + t.end_time) if session_epoch and t.end_time else t.end_time,
+                "start_time": t.start_time,
+                "end_time": t.end_time,
             } for t in transcriptions],
             "questions": [{
                 "id": q.id,
