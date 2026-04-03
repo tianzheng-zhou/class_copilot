@@ -352,12 +352,14 @@ class SessionManager:
                         asr_logger.error("ASR 会话轮换异常: {}", e)
                     continue
 
-                # 连续讲话保护：长时间未收到 final 结果时强制提交音频缓冲
+                # 连续讲话保护：长时间未收到任何文本输出时强制提交音频缓冲
                 max_seg = settings.vad_max_segment_seconds
                 if (max_seg > 0
-                        and hasattr(self.asr_service, 'last_final_elapsed')
+                        and hasattr(self.asr_service, 'last_text_activity_elapsed')
                         and hasattr(self.asr_service, 'force_commit')):
-                    elapsed = self.asr_service.last_final_elapsed
+                    # 用文本活动间隔（含 interim）而非仅 final 间隔判断
+                    # 如果模型正在输出 interim 文本，说明它在正常工作，不应打断
+                    elapsed = self.asr_service.last_text_activity_elapsed
                     if elapsed >= max_seg:
                         asr_logger.info(
                             "连续 {:.0f}s 未收到转写结果，强制提交音频缓冲", elapsed)
@@ -441,6 +443,10 @@ class SessionManager:
         if speaker_label != "UNKNOWN":
             is_teacher = await self._check_is_teacher(speaker_label)
 
+        # 默认时间戳（interim 结果无精确时间）
+        abs_start = 0.0
+        abs_end = 0.0
+
         if is_final:
             self._transcription_seq += 1
 
@@ -453,9 +459,6 @@ class SessionManager:
             elif self._recording_started_at:
                 abs_start = time.time()
                 abs_end = abs_start
-            else:
-                abs_start = 0
-                abs_end = 0
 
             # 保存到数据库（绝对 epoch 时间戳）
             async with async_session() as db:

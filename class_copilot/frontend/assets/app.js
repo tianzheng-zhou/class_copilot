@@ -1266,6 +1266,34 @@ async function loadSettings() {
                 return `<option value="${d.index}" ${selected}>${escapeHtml(d.name)}</option>`;
             }).join('');
 
+        // 加载回环设备
+        const loopbackDevices = devData.loopback_devices || [];
+        const currentLoopback = devData.current_loopback_device;
+        const loopbackSelect = document.getElementById('settingLoopbackDevice');
+        if (loopbackSelect) {
+            loopbackSelect.innerHTML = '<option value="">系统默认扬声器</option>' +
+                loopbackDevices.map(d => {
+                    const selected = (currentLoopback != null && d.id === currentLoopback) ? 'selected' : '';
+                    return `<option value="${escapeHtml(d.id)}" ${selected}>${escapeHtml(d.name)}${d.is_default ? ' (默认)' : ''}</option>`;
+                }).join('');
+        }
+
+        // 音频来源
+        const audioSource = devData.audio_source || 'microphone';
+        const audioSourceSelect = document.getElementById('settingAudioSource');
+        if (audioSourceSelect) {
+            audioSourceSelect.value = audioSource;
+            // 如果不支持回环，禁用该选项
+            if (!devData.loopback_available) {
+                const loopbackOpt = audioSourceSelect.querySelector('option[value="loopback"]');
+                if (loopbackOpt) {
+                    loopbackOpt.disabled = true;
+                    loopbackOpt.textContent += '（不可用 - 需安装 soundcard）';
+                }
+            }
+            toggleAudioSourceUI(audioSource);
+        }
+
         // 加载课程列表
         const courseResp = await fetch('/api/courses');
         const courses = await courseResp.json();
@@ -1351,11 +1379,17 @@ async function saveSettings() {
         });
 
         // 保存麦克风
+        const audioSource = document.getElementById('settingAudioSource')?.value || 'microphone';
         const mic = document.getElementById('settingMicrophone').value;
+        const loopbackDev = document.getElementById('settingLoopbackDevice')?.value || '';
         await fetch('/api/audio/device', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ device_index: mic ? parseInt(mic) : null }),
+            body: JSON.stringify({
+                audio_source: audioSource,
+                device_index: mic ? parseInt(mic) : null,
+                loopback_device_id: loopbackDev || null,
+            }),
         });
 
         // 更新 placeholder 状态
@@ -1379,6 +1413,14 @@ function toggleRefinementSettings() {
     const enabled = document.getElementById('settingRefinement').checked;
     document.getElementById('refinementSettings').style.display = enabled ? 'block' : 'none';
     document.getElementById('btnManualRefine').style.display = enabled ? 'inline-flex' : 'none';
+}
+
+// ──────────── 音频来源切换 ────────────
+function toggleAudioSourceUI(source) {
+    const micGroup = document.getElementById('micDeviceGroup');
+    const loopbackGroup = document.getElementById('loopbackDeviceGroup');
+    if (micGroup) micGroup.style.display = source === 'microphone' ? '' : 'none';
+    if (loopbackGroup) loopbackGroup.style.display = source === 'loopback' ? '' : 'none';
 }
 
 // ──────────── 麦克风音量监控 ────────────
@@ -1452,12 +1494,18 @@ async function startMicMonitor() {
 
     micMonitorPending = true;
     try {
-        // 先保存当前选择的麦克风设备
+        // 先保存当前选择的音频来源和设备
+        const audioSource = document.getElementById('settingAudioSource')?.value || 'microphone';
         const mic = document.getElementById('settingMicrophone').value;
+        const loopbackDev = document.getElementById('settingLoopbackDevice')?.value || '';
         await fetch('/api/audio/device', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ device_index: mic ? parseInt(mic, 10) : null }),
+            body: JSON.stringify({
+                audio_source: audioSource,
+                device_index: mic ? parseInt(mic, 10) : null,
+                loopback_device_id: loopbackDev || null,
+            }),
         });
 
         const resp = await fetch('/api/audio/mic-monitor/start', { method: 'POST' });
@@ -1641,6 +1689,29 @@ document.addEventListener('DOMContentLoaded', () => {
             startMicMonitor();
         }
     });
+
+    // 切换音频来源时更新 UI 并重启监控
+    const audioSourceEl = document.getElementById('settingAudioSource');
+    if (audioSourceEl) {
+        audioSourceEl.addEventListener('change', async () => {
+            toggleAudioSourceUI(audioSourceEl.value);
+            if (micMonitorActive) {
+                await stopMicMonitor();
+                startMicMonitor();
+            }
+        });
+    }
+
+    // 切换回环设备时自动重启监控
+    const loopbackDevEl = document.getElementById('settingLoopbackDevice');
+    if (loopbackDevEl) {
+        loopbackDevEl.addEventListener('change', async () => {
+            if (micMonitorActive) {
+                await stopMicMonitor();
+                startMicMonitor();
+            }
+        });
+    }
 
 
     // OSS 测试连接

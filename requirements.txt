@@ -9,6 +9,7 @@ SQLAlchemy==2.0.48
 aiosqlite==0.22.1
 greenlet==3.3.2
 sounddevice==0.5.5
+soundcard>=0.4.4
 numpy==2.4.3
 lameenc==1.8.2
 dashscope==1.25.13

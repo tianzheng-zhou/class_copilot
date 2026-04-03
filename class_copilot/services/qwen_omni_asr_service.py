@@ -128,6 +128,8 @@ class _QwenOmniASRCallback(OmniRealtimeCallback):
         self._recent_finals: list[str] = []
         # 最近一次 final 输出的时间戳，用于强制提交计时
         self._last_final_at: float = 0
+        # 最近一次收到任何文本(含 interim)的时间戳
+        self._last_text_activity_at: float = 0
 
     def _notify_disconnect(self, error_code=None):
         if self._on_disconnect:
@@ -137,6 +139,7 @@ class _QwenOmniASRCallback(OmniRealtimeCallback):
         """向队列推送一条转写结果"""
         if not text.strip():
             return
+        self._last_text_activity_at = time.monotonic()
         if not self._first_text_logged and self._start_ts:
             elapsed = time.monotonic() - self._start_ts
             asr_logger.info("Omni ASR 首条文本输出延迟: {:.2f}s", elapsed)
@@ -205,7 +208,10 @@ class _QwenOmniASRCallback(OmniRealtimeCallback):
                 self._response_text_buf = ""
 
             elif event_type == "response.created":
-                # 新一轮回复开始，清空缓冲
+                # 新一轮回复开始；如果上一轮还有残余文本，作为 final 推送（防截断）
+                if self._response_text_buf.strip():
+                    self._emit(self._response_text_buf, True)
+                    self._remember_final(self._response_text_buf)
                 self._response_text_buf = ""
 
             # ── VAD ──
@@ -323,8 +329,7 @@ class QwenOmniRealtimeASRService:
             "modalities": ["text"],
             "input_audio_format": "pcm",
             "instructions": instructions,
-            # 显式关闭旁路转写通道，避免额外消耗 context tokens
-            "input_audio_transcription": None,
+            # 不设置 input_audio_transcription，默认不启用旁路转写通道
             "turn_detection": {
                 "type": "server_vad",
                 "threshold": settings.vad_threshold,
@@ -410,6 +415,13 @@ class QwenOmniRealtimeASRService:
             return 0.0
         return time.monotonic() - self._callback._last_final_at
 
+    @property
+    def last_text_activity_elapsed(self) -> float:
+        """距离上次任何文本输出(含 interim)的秒数"""
+        if not self._callback or not self._callback._last_text_activity_at:
+            return 0.0
+        return time.monotonic() - self._callback._last_text_activity_at
+
     async def force_commit(self):
         """强制提交音频缓冲并触发转写
 
@@ -419,6 +431,12 @@ class QwenOmniRealtimeASRService:
         if not self._conversation or not self._running or self._disconnected:
             return
         try:
+            # 先将已累积的 interim 文本作为 final 推送，防止被 response.created 截断
+            if self._callback and self._callback._response_text_buf.strip():
+                self._callback._emit(self._callback._response_text_buf, True)
+                self._callback._remember_final(self._callback._response_text_buf)
+                self._callback._response_text_buf = ""
+
             commit_msg = json.dumps({
                 "event_id": "event_" + uuid.uuid4().hex,
                 "type": "input_audio_buffer.commit",

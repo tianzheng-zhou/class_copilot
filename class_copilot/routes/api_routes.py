@@ -495,13 +495,22 @@ async def serve_recording(filename: str):
 
 @router.get("/audio/devices")
 async def list_audio_devices():
-    return session_manager.audio_service.list_devices()
+    mic_data = session_manager.audio_service.list_devices()
+    loopback_data = session_manager.audio_service.list_loopback_devices()
+    return {
+        **mic_data,
+        "loopback_devices": loopback_data.get("devices", []),
+        "loopback_available": loopback_data.get("available", False),
+        "current_loopback_device": loopback_data.get("current_device"),
+        "audio_source": "loopback" if session_manager.audio_service.loopback_mode else "microphone",
+    }
 
 
 @router.put("/audio/device")
 async def set_audio_device(data: dict):
-    device_index = data.get("device_index")
-    session_manager.audio_service.set_device(device_index)
+    source = data.get("audio_source", "microphone")
+    device_id = data.get("device_index") if source == "microphone" else data.get("loopback_device_id")
+    session_manager.audio_service.set_audio_source(source, device_id)
     return {"status": "updated"}
 
 

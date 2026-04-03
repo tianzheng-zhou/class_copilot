@@ -236,8 +236,21 @@
                     <!-- 音频 -->
                     <div class="settings-pane" data-settings-pane="audio">
                         <div class="form-group">
+                            <label>音频来源</label>
+                            <select id="settingAudioSource">
+                                <option value="microphone">🎤 麦克风</option>
+                                <option value="loopback">🔊 系统声音（扬声器回环）</option>
+                            </select>
+                            <small>线上课堂/会议可选「系统声音」采集扬声器输出</small>
+                        </div>
+                        <div id="micDeviceGroup" class="form-group">
                             <label>麦克风</label>
                             <select id="settingMicrophone"></select>
+                        </div>
+                        <div id="loopbackDeviceGroup" class="form-group" style="display:none;">
+                            <label>输出设备（扬声器）</label>
+                            <select id="settingLoopbackDevice"></select>
+                            <small>选择要采集的音频输出设备</small>
                         </div>
                         <div class="form-group">
                             <label>麦克风音量测试</label>

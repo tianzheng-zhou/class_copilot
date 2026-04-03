@@ -1,6 +1,7 @@
-"""音频采集服务 - 使用 sounddevice 采集并编码为 MP3"""
+"""音频采集服务 - 使用 sounddevice 采集并编码为 MP3，支持系统音频回环采集"""
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 from datetime import datetime
@@ -13,6 +14,13 @@ from loguru import logger
 
 from class_copilot.config import settings
 from class_copilot.logger import asr_logger
+
+# soundcard 仅在 Windows 上用于系统音频回环采集
+try:
+    import soundcard as sc
+    _HAS_SOUNDCARD = True
+except ImportError:
+    _HAS_SOUNDCARD = False
 
 
 class AudioService:
@@ -31,10 +39,16 @@ class AudioService:
         self._start_time: float = 0
         self._device_index: int | None = None
 
+        # 系统音频回环 (loopback)
+        self._loopback_mode: bool = False
+        self._loopback_device_id: str | None = None  # soundcard speaker id
+        self._loopback_thread: threading.Thread | None = None
+
         # 麦克风监控
         self._monitor_stream = None
         self._monitor_loop: asyncio.AbstractEventLoop | None = None
         self._monitor_callback = None
+        self._monitor_loopback_thread: threading.Thread | None = None
         self.is_monitoring = False
 
     def list_devices(self) -> dict:
@@ -69,6 +83,52 @@ class AudioService:
             })
 
         return {"devices": input_devices, "current_device": self._device_index}
+
+    def list_loopback_devices(self) -> dict:
+        """列出可用的系统音频输出设备（用于回环采集）"""
+        if not _HAS_SOUNDCARD:
+            return {"devices": [], "current_device": None, "available": False}
+
+        loopback_devices = []
+        try:
+            default_speaker = sc.default_speaker()
+            default_id = default_speaker.id if default_speaker else None
+            for speaker in sc.all_speakers():
+                loopback_devices.append({
+                    "id": speaker.id,
+                    "name": speaker.name,
+                    "is_default": speaker.id == default_id,
+                })
+        except Exception as e:
+            logger.warning("列出回环设备失败: {}", e)
+
+        return {
+            "devices": loopback_devices,
+            "current_device": self._loopback_device_id,
+            "available": True,
+        }
+
+    @property
+    def loopback_mode(self) -> bool:
+        return self._loopback_mode
+
+    def set_audio_source(self, source: str, device_id: str | int | None = None):
+        """设置音频源类型和设备。
+
+        Args:
+            source: "microphone" 或 "loopback"
+            device_id: 麦克风为 int 设备索引，回环为 str 设备 ID
+        """
+        if source == "loopback":
+            self._loopback_mode = True
+            self._loopback_device_id = str(device_id) if device_id is not None else None
+            self._device_index = None
+            logger.info("音频源: 系统声音回环, 设备={}", self._loopback_device_id)
+        else:
+            self._loopback_mode = False
+            self._loopback_device_id = None
+            self._device_index = int(device_id) if device_id is not None else None
+            logger.info("音频源: 麦克风, 设备={}", self._device_index)
 
     def set_device(self, device_index: int | None):
         """设置音频输入设备"""
@@ -131,18 +191,92 @@ class AudioService:
         self._start_time = time.time()
         self.is_recording = True
 
-        # 开启音频流
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype="int16",
-            blocksize=int(self.sample_rate * 0.1),  # 100ms 块
-            device=self._device_index,
-            callback=self._audio_callback,
-        )
-        self._stream.start()
-        asr_logger.info("录音开始: {}", self.mp3_path)
+        if self._loopback_mode:
+            # 系统音频回环采集（使用 soundcard）
+            self._start_loopback_stream()
+        else:
+            # 麦克风采集（使用 sounddevice）
+            self._stream = sd.InputStream(
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                dtype="int16",
+                blocksize=int(self.sample_rate * 0.1),  # 100ms 块
+                device=self._device_index,
+                callback=self._audio_callback,
+            )
+            self._stream.start()
+        asr_logger.info("录音开始 ({}): {}", "回环" if self._loopback_mode else "麦克风", self.mp3_path)
         return self.mp3_path
+
+    # ── 系统声音回环采集 ──
+
+    def _get_loopback_speaker(self):
+        """获取回环录音对象（loopback microphone）
+
+        soundcard 中 Speaker 对象没有 recorder 方法，需要通过
+        get_microphone(include_loopback=True) 获取对应的回环麦克风。
+        返回的对象具有 recorder() 和 name 属性。
+        """
+        if not _HAS_SOUNDCARD:
+            raise RuntimeError("soundcard 库未安装，无法采集系统声音")
+        if self._loopback_device_id:
+            speaker = sc.get_speaker(self._loopback_device_id)
+        else:
+            speaker = sc.default_speaker()
+        return sc.get_microphone(id=speaker.id, include_loopback=True)
+
+    def _start_loopback_stream(self):
+        """启动系统音频回环采集线程"""
+        speaker = self._get_loopback_speaker()
+        self._loopback_thread = threading.Thread(
+            target=self._loopback_record_loop,
+            args=(speaker,),
+            daemon=True,
+            name="loopback-recorder",
+        )
+        self._loopback_thread.start()
+
+    def _loopback_record_loop(self, speaker):
+        """回环录音线程主循环"""
+        blocksize = int(self.sample_rate * 0.1)  # 100ms
+        try:
+            with speaker.recorder(
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                blocksize=blocksize,
+            ) as rec:
+                asr_logger.info("回环录音线程已启动: {}", speaker.name)
+                while self.is_recording:
+                    # soundcard 返回 float32 [-1, 1]
+                    data = rec.record(numframes=blocksize)
+                    if not self.is_recording:
+                        break
+                    # 转换为 int16
+                    audio_int16 = np.clip(data * 32767, -32768, 32767).astype(np.int16)
+                    # 只取第一个声道（如果录到的是多声道）
+                    if audio_int16.ndim > 1 and self.channels == 1:
+                        audio_int16 = audio_int16[:, 0:1]
+                    audio_bytes = audio_int16.tobytes()
+
+                    # 写入 MP3
+                    if self.mp3_encoder and self.mp3_file:
+                        mp3_data = self.mp3_encoder.encode(audio_bytes)
+                        if mp3_data:
+                            self.mp3_file.write(mp3_data)
+                            self.mp3_file.flush()
+
+                    # 推送到 ASR 队列
+                    if self._loop and self.is_recording:
+                        try:
+                            self._loop.call_soon_threadsafe(
+                                self.audio_queue.put_nowait, audio_bytes
+                            )
+                        except asyncio.QueueFull:
+                            pass
+        except Exception as e:
+            asr_logger.error("回环录音线程异常: {}", e)
+        finally:
+            asr_logger.info("回环录音线程已退出")
 
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status):
         """音频流回调（在音频线程中运行）"""
@@ -178,6 +312,11 @@ class AudioService:
             self._stream.close()
             self._stream = None
 
+        # 停止回环线程
+        if self._loopback_thread and self._loopback_thread.is_alive():
+            self._loopback_thread.join(timeout=2)
+            self._loopback_thread = None
+
         # 刷新 MP3 编码器
         if self.mp3_encoder and self.mp3_file:
             remaining = self.mp3_encoder.flush()
@@ -205,7 +344,7 @@ class AudioService:
         return 0
 
     def start_mic_monitor(self, callback):
-        """开始麦克风音量监控，callback(rms, db) 将在每个音频块上被调用"""
+        """开始音量监控，callback(db, peak, clipping) 将在每个音频块上被调用"""
         if self.is_monitoring:
             return
         self._monitor_loop = asyncio.get_event_loop()
@@ -213,20 +352,58 @@ class AudioService:
         self.is_monitoring = True
 
         try:
-            stream_config = self._get_monitor_stream_config()
-            self._monitor_stream = sd.InputStream(**stream_config)
-            self._monitor_stream.start()
-            logger.info(
-                "麦克风监控已启动: device={}, samplerate={}, channels={}",
-                self._device_index,
-                stream_config["samplerate"],
-                stream_config["channels"],
-            )
+            if self._loopback_mode:
+                # 回环模式：使用 soundcard 在后台线程中采集
+                speaker = self._get_loopback_speaker()
+                self._monitor_loopback_thread = threading.Thread(
+                    target=self._loopback_monitor_loop,
+                    args=(speaker,),
+                    daemon=True,
+                    name="loopback-monitor",
+                )
+                self._monitor_loopback_thread.start()
+                logger.info("回环音量监控已启动: {}", speaker.name)
+            else:
+                stream_config = self._get_monitor_stream_config()
+                self._monitor_stream = sd.InputStream(**stream_config)
+                self._monitor_stream.start()
+                logger.info(
+                    "麦克风监控已启动: device={}, samplerate={}, channels={}",
+                    self._device_index,
+                    stream_config["samplerate"],
+                    stream_config["channels"],
+                )
         except Exception:
             self.is_monitoring = False
             self._monitor_stream = None
+            self._monitor_loopback_thread = None
             self._monitor_callback = None
             raise
+
+    def _loopback_monitor_loop(self, speaker):
+        """回环音量监控线程"""
+        blocksize = int(self.sample_rate * 0.05)
+        try:
+            with speaker.recorder(
+                samplerate=self.sample_rate, channels=1, blocksize=blocksize
+            ) as rec:
+                while self.is_monitoring:
+                    data = rec.record(numframes=blocksize)
+                    if not self.is_monitoring:
+                        break
+                    samples = data[:, 0].astype(np.float64)
+                    # soundcard 返回 [-1, 1] 范围，映射到 int16 范围计算
+                    samples_i16 = samples * 32768.0
+                    rms = np.sqrt(np.mean(samples_i16 ** 2))
+                    peak = np.max(np.abs(samples_i16))
+                    db = 20 * np.log10(max(rms, 1) / 32768.0)
+                    clipping = bool(peak >= 32000)
+                    if self._monitor_loop and self._monitor_callback:
+                        self._monitor_loop.call_soon_threadsafe(
+                            self._monitor_callback, db, peak, clipping
+                        )
+        except Exception as e:
+            logger.error("回环监控线程异常: {}", e)
 
     def _monitor_audio_callback(self, indata: np.ndarray, frames: int, time_info, status):
         """监控音频流回调"""
@@ -247,7 +424,7 @@ class AudioService:
             )
 
     def stop_mic_monitor(self):
-        """停止麦克风音量监控"""
+        """停止音量监控"""
         if not self.is_monitoring:
             return
         self.is_monitoring = False
@@ -255,5 +432,8 @@ class AudioService:
             self._monitor_stream.stop()
             self._monitor_stream.close()
             self._monitor_stream = None
+        if self._monitor_loopback_thread and self._monitor_loopback_thread.is_alive():
+            self._monitor_loopback_thread.join(timeout=2)
+            self._monitor_loopback_thread = None
         self._monitor_callback = None
-        logger.info("麦克风监控已停止")
+        logger.info("音量监控已停止")
