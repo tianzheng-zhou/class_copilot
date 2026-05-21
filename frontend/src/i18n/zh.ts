@@ -194,6 +194,8 @@ export const zh: Dictionary = {
   asr_vad_silence: "VAD 静音持续 (ms)",
   asr_session_rotate: "ASR 会话轮换 (分钟)",
   asr_max_segment: "硬兜底段落上限 (秒)",
+  asr_no_output_timeout: "转写无输出超时 (分钟)",
+  asr_no_output_timeout_hint: "达到设定时间仍没有转写文字时，自动停止本次监听；0 表示关闭。",
 
   qparam_title: "问题检测参数",
   qparam_desc: "影响 AI 自动检测问题的灵敏度与去重。",

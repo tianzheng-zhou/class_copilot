@@ -33,6 +33,7 @@ class SettingsPatch(BaseModel):
     vad_silence_duration_ms: int | None = None
     asr_session_rotate_minutes: float | None = None
     vad_max_segment_seconds: float | None = None
+    transcript_no_output_timeout_minutes: float | None = None
     question_confidence_threshold: float | None = None
     question_cooldown_seconds: int | None = None
     question_similarity_threshold: float | None = None

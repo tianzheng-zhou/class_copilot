@@ -90,6 +90,20 @@ export function AsrParamsSection() {
             }
           />
         </Field>
+        <Field label={t.asr_no_output_timeout} hint={t.asr_no_output_timeout_hint}>
+          <Input
+            type="number"
+            min={0}
+            step={0.5}
+            value={settings.transcript_no_output_timeout_minutes}
+            onChange={(event) =>
+              onChange(
+                "transcript_no_output_timeout_minutes",
+                Math.max(0, Number(event.target.value)),
+              )
+            }
+          />
+        </Field>
       </CardBody>
     </Card>
   );

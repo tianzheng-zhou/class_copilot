@@ -102,6 +102,8 @@ export interface NotificationData {
 export type ErrorCode =
   | "asr_permanent"
   | "asr_unavailable"
+  | "transcript_no_output_timeout"
+  | "stop_failed"
   | "audio_device"
   | "config_missing"
   | "bad_request"
@@ -111,6 +113,7 @@ export type ErrorCode =
 export interface ErrorEventData {
   code: ErrorCode;
   message: string;
+  detail?: string;
 }
 
 export interface InboundMessages {

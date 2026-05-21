@@ -93,6 +93,7 @@ export interface RuntimeSettings {
   vad_silence_duration_ms: number;
   asr_session_rotate_minutes: number;
   vad_max_segment_seconds: number;
+  transcript_no_output_timeout_minutes: number;
   question_confidence_threshold: number;
   question_cooldown_seconds: number;
   question_similarity_threshold: number;
@@ -117,6 +118,7 @@ export type SettingsPatch = Partial<{
   vad_silence_duration_ms: number;
   asr_session_rotate_minutes: number;
   vad_max_segment_seconds: number;
+  transcript_no_output_timeout_minutes: number;
   question_confidence_threshold: number;
   question_cooldown_seconds: number;
   question_similarity_threshold: number;

@@ -194,6 +194,8 @@ export interface Dictionary {
   asr_vad_silence: string;
   asr_session_rotate: string;
   asr_max_segment: string;
+  asr_no_output_timeout: string;
+  asr_no_output_timeout_hint: string;
   // Question params
   qparam_title: string;
   qparam_desc: string;

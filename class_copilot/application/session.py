@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import os
 import re
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Awaitable
 
+from loguru import logger
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from class_copilot.application.question import (
@@ -46,6 +49,7 @@ SEGMENT_MIN_TRANSCRIPT_CHARS = 30
 ASR_CONTEXT_MAX_CHARS = 1000
 INTERIM_QUESTION_DETECT_INTERVAL_SECONDS = 5.0
 INTERIM_QUESTION_DETECT_MIN_CHARS = 20
+NO_OUTPUT_CHECK_INTERVAL_SECONDS = 1.0
 
 
 @dataclass(slots=True)
@@ -96,17 +100,22 @@ class ASRPipeline:
         self._interim_detection_task: asyncio.Task | None = None
         self._last_interim_detection_monotonic = 0.0
         self._last_interim_detection_text = ""
+        self._last_output_monotonic = time.monotonic()
 
     def start(self) -> None:
         self._tasks = [
             asyncio.create_task(self._feed_audio(), name="asr-feed-audio"),
             asyncio.create_task(self._process_results(), name="asr-process-results"),
             asyncio.create_task(self._supervise_asr(), name="asr-supervise"),
+            asyncio.create_task(self._watch_no_output_timeout(), name="asr-no-output-watchdog"),
         ]
 
     async def stop(self) -> None:
         current_task = asyncio.current_task()
-        await self._cancel_tasks({"asr-feed-audio", "asr-supervise"}, current_task)
+        await self._cancel_tasks(
+            {"asr-feed-audio", "asr-supervise", "asr-no-output-watchdog"},
+            current_task,
+        )
         await self._drain_audio_queue()
         if self._segment_audio_bytes > 0:
             await self.asr.force_commit()
@@ -257,6 +266,7 @@ class ASRPipeline:
                         },
                     }
                 )
+                self._remember_output_activity()
                 await self._maybe_detect_question(context=context, source="auto")
             else:
                 self._remember_interim_text(result.text)
@@ -273,7 +283,52 @@ class ASRPipeline:
                         },
                     }
                 )
+                self._remember_output_activity()
                 self._schedule_interim_question_detection(result.text)
+
+    async def _watch_no_output_timeout(self) -> None:
+        try:
+            while self.is_listening:
+                timeout_minutes = self.settings_service.runtime.transcript_no_output_timeout_minutes
+                if timeout_minutes > 0:
+                    elapsed_seconds = time.monotonic() - self._last_output_monotonic
+                    timeout_seconds = timeout_minutes * 60
+                    if elapsed_seconds >= timeout_seconds:
+                        timeout_label = _format_minutes(timeout_minutes)
+                        elapsed_label = _format_seconds(elapsed_seconds)
+                        message = (
+                            f"No transcription output for {elapsed_label}; "
+                            f"stopping listening because the limit is {timeout_label}."
+                        )
+                        logger.error(
+                            "Transcription output timeout session_id={} elapsed_seconds={:.1f} "
+                            "timeout_minutes={}",
+                            self.session_id,
+                            elapsed_seconds,
+                            timeout_minutes,
+                        )
+                        await self._broadcast_error(
+                            "transcript_no_output_timeout",
+                            message,
+                            detail=(
+                                "The backend stopped the active listening session because ASR did "
+                                "not produce interim or final transcript text before the configured timeout."
+                            ),
+                        )
+                        await self.stop_callback("interrupted")
+                        return
+                await asyncio.sleep(NO_OUTPUT_CHECK_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("No-output timeout watchdog failed")
+            message = (
+                "No-output timeout handling failed. The backend will exit; "
+                f"check logs for details: {exc.__class__.__name__}: {exc}"
+            )
+            with suppress(Exception):
+                await self._broadcast_error("stop_failed", message, detail=repr(exc))
+            os._exit(1)
 
     def _is_duplicate_transcript(self, text: str) -> bool:
         normalized = _normalize_transcript(text)
@@ -307,6 +362,9 @@ class ASRPipeline:
     def _remember_interim_text(self, text: str) -> None:
         self._latest_interim_text = text.strip()
         self._latest_interim_updated_monotonic = time.monotonic()
+
+    def _remember_output_activity(self) -> None:
+        self._last_output_monotonic = time.monotonic()
 
     def _has_stable_interim_sentence_boundary(self) -> bool:
         if time.monotonic() - self._latest_interim_updated_monotonic < SEGMENT_STABLE_INTERIM_SECONDS:
@@ -455,8 +513,11 @@ class ASRPipeline:
     async def _notification(self, level: str, message: str) -> None:
         await self.broadcast({"type": "notification", "data": {"level": level, "message": message}})
 
-    async def _broadcast_error(self, code: str, message: str) -> None:
-        await self.broadcast({"type": "error", "data": {"code": code, "message": message}})
+    async def _broadcast_error(self, code: str, message: str, detail: str | None = None) -> None:
+        data = {"code": code, "message": message}
+        if detail:
+            data["detail"] = detail
+        await self.broadcast({"type": "error", "data": data})
 
 
 class AutoStop:
@@ -520,6 +581,7 @@ class SessionService:
         self._capture: AudioCapture | None = None
         self._capture_cm = None
         self._auto_stop = AutoStop(broadcast, self.stop_listening)
+        self._stopping = False
 
     async def startup_recover(self) -> None:
         async with self.sessionmaker() as db:
@@ -626,31 +688,55 @@ class SessionService:
         return session
 
     async def stop_listening(self, reason: str = "stopped") -> None:
+        if self._stopping:
+            return
         if not self.state.session_id:
             return
-        session_id = self.state.session_id
-        self._auto_stop.cancel()
-        duration = None
-        size = None
-        if self._capture is not None:
-            duration = self._capture.duration_seconds
-            await self._capture.__aexit__(None, None, None)
-            size = self._capture.file_size_bytes
-            self._capture = None
-        if self._pipeline:
-            await self._pipeline.stop()
-            self._pipeline = None
-        async with self.sessionmaker() as db:
-            await SessionRepository(db).finish(
-                session_id,
-                status=reason,
-                ended_at=datetime.now(UTC),
-                recording_duration_seconds=duration,
-                recording_file_size_bytes=size,
+        self._stopping = True
+        try:
+            session_id = self.state.session_id
+            self._auto_stop.cancel()
+            duration = None
+            size = None
+            if self._capture is not None:
+                duration = self._capture.duration_seconds
+                await self._capture.__aexit__(None, None, None)
+                size = self._capture.file_size_bytes
+                self._capture = None
+            if self._pipeline:
+                await self._pipeline.stop()
+                self._pipeline = None
+            async with self.sessionmaker() as db:
+                await SessionRepository(db).finish(
+                    session_id,
+                    status=reason,
+                    ended_at=datetime.now(UTC),
+                    recording_duration_seconds=duration,
+                    recording_file_size_bytes=size,
+                )
+            self.state.is_listening = False
+            await self.broadcast(self.status_event("stopped" if reason == "stopped" else "error"))
+            self.state = ListeningState()
+        except Exception as exc:
+            logger.exception("Failed to stop listening session cleanly")
+            message = (
+                "Failed to stop listening cleanly. The backend will exit; "
+                f"check logs for details: {exc.__class__.__name__}: {exc}"
             )
-        self.state.is_listening = False
-        await self.broadcast(self.status_event("stopped" if reason == "stopped" else "error"))
-        self.state = ListeningState()
+            with suppress(Exception):
+                await self.broadcast(
+                    {
+                        "type": "error",
+                        "data": {
+                            "code": "stop_failed",
+                            "message": message,
+                            "detail": repr(exc),
+                        },
+                    }
+                )
+            os._exit(1)
+        finally:
+            self._stopping = False
 
     async def manual_detect(self) -> None:
         if self._pipeline is None:
@@ -704,6 +790,18 @@ def _is_ascii_boundary(left: str, right: str) -> bool:
     if not left or not right:
         return False
     return left[-1].isascii() and left[-1].isalnum() and right[0].isascii() and right[0].isalnum()
+
+
+def _format_minutes(minutes: float) -> str:
+    if minutes == int(minutes):
+        return f"{int(minutes)} min"
+    return f"{minutes:.2f}".rstrip("0").rstrip(".") + " min"
+
+
+def _format_seconds(seconds: float) -> str:
+    if seconds >= 60:
+        return _format_minutes(seconds / 60)
+    return f"{int(seconds)} sec"
 
 
 def _paragraph_context(paragraphs: list[str], max_chars: int) -> str:

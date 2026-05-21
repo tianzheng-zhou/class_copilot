@@ -240,8 +240,39 @@ async def test_incomplete_final_transcript_merges_with_next_segment(app):
     assert context == "马耳他公民完成当地大学开发的AI培训课程后。"
 
 
+async def test_no_output_timeout_stops_session_and_broadcasts_error(app):
+    events: list[dict] = []
+    app.state.session_service.broadcast = _collect(events)
+    await app.state.settings_service.update({"transcript_no_output_timeout_minutes": 0.001})
+    course = await _create_course(app, "no output timeout")
+
+    await app.state.session_service.start_listening(course_id=course.id)
+
+    for _ in range(40):
+        if any(event["type"] == "error" for event in events):
+            break
+        await asyncio.sleep(0.05)
+
+    errors = [event for event in events if event["type"] == "error"]
+    assert errors
+    assert errors[-1]["data"]["code"] == "transcript_no_output_timeout"
+
+    for _ in range(40):
+        if not app.state.session_service.state.is_listening:
+            break
+        await asyncio.sleep(0.05)
+    assert app.state.session_service.state.is_listening is False
+
+
 async def _create_course(app, name: str):
     from class_copilot.infrastructure.persistence.repositories import CourseRepository
 
     async with app.state.sessionmaker() as db:
         return await CourseRepository(db).create(name)
+
+
+def _collect(events: list[dict]):
+    async def broadcast(event: dict) -> None:
+        events.append(event)
+
+    return broadcast

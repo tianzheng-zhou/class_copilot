@@ -193,6 +193,8 @@ export const en: Dictionary = {
   asr_vad_silence: "VAD Silence Duration (ms)",
   asr_session_rotate: "ASR Session Rotation (min)",
   asr_max_segment: "Hard Segment Limit (sec)",
+  asr_no_output_timeout: "No-output Timeout (min)",
+  asr_no_output_timeout_hint: "Stop listening if no transcript text appears for this long. Set 0 to disable.",
 
   qparam_title: "Question Detection",
   qparam_desc: "Affects sensitivity and deduplication of auto-detected questions.",

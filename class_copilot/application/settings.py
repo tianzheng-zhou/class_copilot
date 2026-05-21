@@ -30,6 +30,7 @@ class RuntimeSettings:
     vad_silence_duration_ms: int = 800
     asr_session_rotate_minutes: float = 12.0
     vad_max_segment_seconds: float = 60.0
+    transcript_no_output_timeout_minutes: float = 5.0
     question_confidence_threshold: float = 0.7
     question_cooldown_seconds: int = 15
     question_similarity_threshold: float = 0.8
@@ -54,6 +55,7 @@ SETTING_TYPES: dict[str, Callable[[str], Any]] = {
     "vad_silence_duration_ms": int,
     "asr_session_rotate_minutes": float,
     "vad_max_segment_seconds": float,
+    "transcript_no_output_timeout_minutes": float,
     "question_confidence_threshold": float,
     "question_cooldown_seconds": int,
     "question_similarity_threshold": float,
@@ -175,6 +177,11 @@ class SettingsService:
             return str(Path(str(value)).expanduser())
         if value is None:
             return None
+        if key == "transcript_no_output_timeout_minutes":
+            parsed = self._parse_value(key, str(value))
+            if parsed < 0:
+                raise ConfigurationError("transcript_no_output_timeout_minutes must be >= 0")
+            return parsed
         return self._parse_value(key, str(value))
 
     def _serialize_value(self, value: Any) -> str:

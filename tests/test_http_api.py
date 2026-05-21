@@ -15,6 +15,7 @@ async def test_courses_settings_and_session_export(client, app):
     assert settings.status_code == 200
     assert settings.json()["dashscope_api_key"] == "sk-t****"
     assert settings.json()["dashscope_api_key_set"] is True
+    assert settings.json()["transcript_no_output_timeout_minutes"] == 5.0
 
     patched = await client.patch(
         "/api/settings",
@@ -23,6 +24,7 @@ async def test_courses_settings_and_session_export(client, app):
             "auto_answer_language": "en",
             "auto_answer_model": "qwen3.5-plus",
             "chat_language": "zh",
+            "transcript_no_output_timeout_minutes": 3.5,
         },
     )
     assert patched.status_code == 200
@@ -30,6 +32,7 @@ async def test_courses_settings_and_session_export(client, app):
     assert patched.json()["auto_answer_language"] == "en"
     assert patched.json()["auto_answer_model"] == "qwen3.5-plus"
     assert patched.json()["chat_language"] == "zh"
+    assert patched.json()["transcript_no_output_timeout_minutes"] == 3.5
 
     legacy = await client.patch("/api/settings", json={"language": "en"})
     assert legacy.status_code == 200
