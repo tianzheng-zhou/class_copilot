@@ -447,7 +447,10 @@ class ASRPipeline:
         try:
             await self.asr.stop()
             await asyncio.sleep(0.2)
-            await self.asr.start(language=self.settings_service.runtime.asr_language)
+            await self.asr.start(
+                language=self.settings_service.runtime.asr_language,
+                manual_turn_detection=True,
+            )
             return True
         except (ASRConnectionError, ASRPermanentError):
             return False

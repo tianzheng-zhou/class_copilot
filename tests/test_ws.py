@@ -245,3 +245,18 @@ async def _create_course(app, name: str):
 
     async with app.state.sessionmaker() as db:
         return await CourseRepository(db).create(name)
+
+
+async def test_asr_rotation_keeps_manual_turn_detection(app):
+    course = await _create_course(app, "rotation")
+
+    await app.state.session_service.start_listening(course_id=course.id)
+    app.state.fake_asr.needs_rotation = True
+
+    for _ in range(20):
+        if app.state.fake_asr.rotate_count >= 1:
+            break
+        await asyncio.sleep(0.05)
+
+    assert app.state.fake_asr.rotate_count == 1
+    assert app.state.fake_asr.manual_turn_detection is True

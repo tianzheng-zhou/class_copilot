@@ -156,9 +156,10 @@ class QwenOmniRealtimeASR:
     async def rotate_session(self) -> None:
         language = self.settings.asr_language
         context = self._context
+        manual_turn_detection = self._manual_turn_detection
         await self.stop()
         await asyncio.sleep(0.2)
-        await self.start(language=language)
+        await self.start(language=language, manual_turn_detection=manual_turn_detection)
         if context:
             await self.update_context(context)
         self.needs_rotation = False
