@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local env files
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Runtime data
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+
+# Node / frontend build outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Editor / OS local files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
