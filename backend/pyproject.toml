@@ -1,0 +1,20 @@
+[project]
+name = "class-copilot-next"
+version = "0.1.0"
+description = "Local classroom workspace with durable audio and AI tasks"
+requires-python = ">=3.12,<3.13"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "sqlalchemy>=2.0,<3", "alembic>=1.14,<2", "httpx>=0.28,<1", "cryptography>=44", "python-multipart>=0.0.20", "sounddevice>=0.5,<1", "numpy>=2,<3"]
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.25", "ruff>=0.11"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["src/class_copilot"]
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+[tool.ruff]
+line-length = 110
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
