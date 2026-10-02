@@ -75,7 +75,7 @@ test('saved settings, record stop, post-class chat, summary, export and source p
   const download = await downloadPromise
   expect(download.suggestedFilename()).toMatch(/\.md$/)
   await page.getByRole('button', { name: '音频来源', exact: true }).click()
-  await expect(page.locator('audio')).toBeVisible()
+  await expect(page.locator('.player').getByRole('button', { name: '播放', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: '下载 MP3' })).toBeVisible()
   await page.getByRole('button', { name: '关闭面板' }).click()
   await page.screenshot({ path: 'test-results/workspace-populated.png', fullPage: true })

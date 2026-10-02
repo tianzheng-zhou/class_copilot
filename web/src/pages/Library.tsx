@@ -1,9 +1,20 @@
 import { useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowUpRight, BookOpen, Plus, Search, MoreHorizontal, CalendarDays } from 'lucide-react'
+import { ArrowUpRight, BookOpen, Plus, Search, MoreHorizontal } from 'lucide-react'
 import { api, type Bootstrap, type Course, type Lesson, type Page } from '../api'
-import { useUI, useAction, Modal, Empty, Loading, ErrorBox, dateLabel, Badge, Select } from '../ui'
+import {
+  useUI,
+  useAction,
+  Modal,
+  Empty,
+  Loading,
+  ErrorBox,
+  dateLabel,
+  Badge,
+  DatePicker,
+  Select,
+} from '../ui'
 
 export function Library() {
   const { t, lang } = useUI()
@@ -105,22 +116,23 @@ export function Library() {
             ...(courses.data?.items.map((c) => ({ value: c.id, label: c.name })) ?? []),
           ]}
         />
-        <label className="date-filter">
-          <CalendarDays size={16} />
-          <input
-            type="date"
+        <div className="date-filter">
+          <DatePicker
             aria-label={t('开始日期', 'From date')}
+            placeholder={t('开始日期', 'From')}
             value={from}
-            onChange={(e) => setFrom(e.target.value)}
+            max={to || undefined}
+            onChange={setFrom}
           />
           <span>—</span>
-          <input
-            type="date"
+          <DatePicker
             aria-label={t('结束日期', 'To date')}
+            placeholder={t('结束日期', 'To')}
             value={to}
-            onChange={(e) => setTo(e.target.value)}
+            min={from || undefined}
+            onChange={setTo}
           />
-        </label>
+        </div>
       </div>
       {lessons.isLoading ? (
         <Loading />

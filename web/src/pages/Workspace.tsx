@@ -9,10 +9,13 @@ import {
   MessageSquare,
   Mic,
   MoreHorizontal,
+  Pause,
   Play,
   Send,
   Square,
   Upload,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react'
 import {
@@ -222,6 +225,91 @@ function QuestionCard({ question, onLocate }: { question: Question; onLocate: (i
     </article>
   )
 }
+function AudioPlayer({
+  src,
+  fallbackMs,
+  register,
+}: {
+  src: string
+  fallbackMs: number
+  register: (node: HTMLAudioElement | null) => void
+}) {
+  const { t } = useUI()
+  const audio = useRef<HTMLAudioElement | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [muted, setMuted] = useState(false)
+  const [speed, setSpeed] = useState('1')
+  const [current, setCurrent] = useState(0)
+  const [total, setTotal] = useState(fallbackMs / 1000)
+  const progress = total ? Math.min(100, (current / total) * 100) : 0
+  return (
+    <div className="player">
+      <audio
+        ref={(node) => {
+          audio.current = node
+          register(node)
+        }}
+        preload="none"
+        src={src}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) =>
+          Number.isFinite(e.currentTarget.duration) && setTotal(e.currentTarget.duration)
+        }
+        onRateChange={(e) => setSpeed(String(e.currentTarget.playbackRate))}
+        onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
+      />
+      <button
+        className="player-toggle"
+        aria-label={playing ? t('暂停', 'Pause') : t('播放', 'Play')}
+        onClick={() => {
+          const node = audio.current
+          if (!node) return
+          if (node.paused) void node.play().catch(() => {})
+          else node.pause()
+        }}
+      >
+        {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+      </button>
+      <span className="player-time mono">{duration(current * 1000)}</span>
+      <input
+        type="range"
+        className="player-seek"
+        aria-label={t('播放进度', 'Seek')}
+        min={0}
+        max={total || 0}
+        step={0.1}
+        value={Math.min(current, total)}
+        disabled={!total}
+        style={{ '--progress': `${progress}%` } as CSSProperties}
+        onChange={(e) => {
+          const time = +e.target.value
+          setCurrent(time)
+          if (audio.current) audio.current.currentTime = time
+        }}
+      />
+      <span className="player-time mono">{duration(total * 1000)}</span>
+      <button
+        className="icon-button"
+        aria-label={muted ? t('取消静音', 'Unmute') : t('静音', 'Mute')}
+        aria-pressed={muted}
+        onClick={() => audio.current && (audio.current.muted = !audio.current.muted)}
+      >
+        {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+      </button>
+      <Select
+        aria-label={t('播放速度', 'Playback speed')}
+        value={speed}
+        onChange={(value) => {
+          setSpeed(value)
+          if (audio.current) audio.current.playbackRate = +value
+        }}
+        options={['0.75', '1', '1.25', '1.5', '2'].map((n) => ({ value: n, label: `${n}×` }))}
+      />
+    </div>
+  )
+}
 function SourceCard({
   source,
   playRefs,
@@ -234,7 +322,6 @@ function SourceCard({
   const { t } = useUI()
   const { run, busy } = useAction()
   const [minutes, setMinutes] = useState('')
-  const [speed, setSpeed] = useState('1')
   const playable = source.assets.find((a) => a.role === 'playback')
   const original = source.assets.find((a) => a.role === 'original')
   const recording = ['capturing', 'preparing', 'finalizing'].includes(source.capture_state)
@@ -255,25 +342,13 @@ function SourceCard({
         </span>
       </div>
       {playable ? (
-        <div className="player">
-          <audio
-            ref={(node) => {
-              playRefs.current[source.id] = node
-            }}
-            controls
-            preload="none"
-            src={playable.url}
-          />
-          <Select
-            aria-label={t('播放速度', 'Playback speed')}
-            value={speed}
-            onChange={(value) => {
-              setSpeed(value)
-              if (playRefs.current[source.id]) playRefs.current[source.id]!.playbackRate = +value
-            }}
-            options={['0.75', '1', '1.25', '1.5', '2'].map((n) => ({ value: n, label: `${n}×` }))}
-          />
-        </div>
+        <AudioPlayer
+          src={playable.url}
+          fallbackMs={source.duration_ms}
+          register={(node) => {
+            playRefs.current[source.id] = node
+          }}
+        />
       ) : (
         <p className="muted">
           {t(

@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
+    "pretest:e2e": "vite build",
     "test:e2e": "playwright test",
     "generate:api": "openapi-typescript openapi.json -o src/api.generated.ts",
     "format": "prettier --write src tests *.ts",

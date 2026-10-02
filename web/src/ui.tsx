@@ -10,7 +10,16 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { LoaderCircle, X, AlertCircle, Check, ChevronDown } from 'lucide-react'
+import {
+  LoaderCircle,
+  X,
+  AlertCircle,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQueryClient } from '@tanstack/react-query'
@@ -165,6 +174,63 @@ export function Modal({
 }
 export type SelectOption = { value: string; label: string }
 type MenuPlacement = { left: number; width: number; top?: number; bottom?: number; maxHeight: number }
+const popoverStyle = (placement: MenuPlacement) => ({
+  left: placement.left,
+  top: placement.top,
+  bottom: placement.bottom,
+  minWidth: placement.width,
+  maxHeight: placement.maxHeight,
+})
+/** Fixed-position popover anchored to a trigger: flips upward when space is short, follows scroll/resize, closes on outside press. */
+function usePopover<T extends HTMLElement, P extends HTMLElement>(preferred = 220, cap = 300) {
+  const [open, setOpen] = useState(false)
+  const [placement, setPlacement] = useState<MenuPlacement>()
+  const trigger = useRef<T>(null)
+  const popover = useRef<P>(null)
+  const place = () => {
+    const box = trigger.current?.getBoundingClientRect()
+    if (!box) return
+    const below = innerHeight - box.bottom - 12,
+      above = box.top - 12,
+      up = below < preferred && above > below
+    setPlacement({
+      left: box.left,
+      width: box.width,
+      top: up ? undefined : box.bottom + 5,
+      bottom: up ? innerHeight - box.top + 5 : undefined,
+      maxHeight: Math.max(120, Math.min(cap, up ? above : below)),
+    })
+  }
+  const show = () => {
+    place()
+    setOpen(true)
+  }
+  useLayoutEffect(() => {
+    const node = popover.current
+    if (!open || !node || !placement) return
+    const overflow = placement.left + node.offsetWidth - (innerWidth - 8)
+    node.style.left = `${Math.max(8, placement.left - Math.max(0, overflow))}px`
+  }, [open, placement])
+  useEffect(() => {
+    if (!open) return
+    const outside = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!trigger.current?.contains(target) && !popover.current?.contains(target)) setOpen(false)
+    }
+    const reposition = (event: Event) => {
+      if (!popover.current?.contains(event.target as Node)) place()
+    }
+    document.addEventListener('pointerdown', outside)
+    window.addEventListener('scroll', reposition, true)
+    window.addEventListener('resize', place)
+    return () => {
+      document.removeEventListener('pointerdown', outside)
+      window.removeEventListener('scroll', reposition, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [open])
+  return { open, setOpen, show, placement, trigger, popover }
+}
 export function Select({
   value,
   options,
@@ -182,33 +248,22 @@ export function Select({
   className?: string
   'aria-label'?: string
 }) {
-  const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
-  const [placement, setPlacement] = useState<MenuPlacement>()
-  const trigger = useRef<HTMLButtonElement>(null)
-  const menu = useRef<HTMLUListElement>(null)
+  const {
+    open,
+    setOpen,
+    show: reveal,
+    placement,
+    trigger,
+    popover: menu,
+  } = usePopover<HTMLButtonElement, HTMLUListElement>()
   const typed = useRef({ text: '', at: 0 })
   const id = useId()
   const selected = options.findIndex((o) => o.value === value)
-  const place = () => {
-    const box = trigger.current?.getBoundingClientRect()
-    if (!box) return
-    const below = innerHeight - box.bottom - 12,
-      above = box.top - 12,
-      up = below < 220 && above > below
-    setPlacement({
-      left: box.left,
-      width: box.width,
-      top: up ? undefined : box.bottom + 5,
-      bottom: up ? innerHeight - box.top + 5 : undefined,
-      maxHeight: Math.max(120, Math.min(300, up ? above : below)),
-    })
-  }
   const show = (index = selected) => {
     if (disabled || !options.length) return
-    place()
     setActive(Math.max(0, index))
-    setOpen(true)
+    reveal()
   }
   const choose = (index: number) => {
     const option = options[index]
@@ -216,30 +271,6 @@ export function Select({
     trigger.current?.focus()
     if (option && option.value !== value) onChange(option.value)
   }
-  useLayoutEffect(() => {
-    const node = menu.current
-    if (!open || !node || !placement) return
-    const overflow = placement.left + node.offsetWidth - (innerWidth - 8)
-    node.style.left = `${Math.max(8, placement.left - Math.max(0, overflow))}px`
-  }, [open, placement])
-  useEffect(() => {
-    if (!open) return
-    const outside = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!trigger.current?.contains(target) && !menu.current?.contains(target)) setOpen(false)
-    }
-    const reposition = (event: Event) => {
-      if (event.target !== menu.current) place()
-    }
-    document.addEventListener('pointerdown', outside)
-    window.addEventListener('scroll', reposition, true)
-    window.addEventListener('resize', place)
-    return () => {
-      document.removeEventListener('pointerdown', outside)
-      window.removeEventListener('scroll', reposition, true)
-      window.removeEventListener('resize', place)
-    }
-  }, [open])
   useEffect(() => {
     if (open) menu.current?.children[active]?.scrollIntoView({ block: 'nearest' })
   }, [open, active])
@@ -326,13 +357,7 @@ export function Select({
             role="listbox"
             aria-label={ariaLabel}
             className={`select-menu${placement.top === undefined ? ' up' : ''}`}
-            style={{
-              left: placement.left,
-              top: placement.top,
-              bottom: placement.bottom,
-              minWidth: placement.width,
-              maxHeight: placement.maxHeight,
-            }}
+            style={popoverStyle(placement)}
           >
             {options.map((option, index) => (
               <li
@@ -350,6 +375,201 @@ export function Select({
               </li>
             ))}
           </ul>,
+          document.body,
+        )}
+    </div>
+  )
+}
+const isoDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const parseDate = (value: string) => {
+  const [y, m, d] = value.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+const addMonths = (d: Date, n: number) => {
+  const last = new Date(d.getFullYear(), d.getMonth() + n + 1, 0).getDate()
+  return new Date(d.getFullYear(), d.getMonth() + n, Math.min(d.getDate(), last))
+}
+export function DatePicker({
+  value,
+  onChange,
+  min,
+  max,
+  placeholder,
+  'aria-label': ariaLabel,
+}: {
+  value: string
+  onChange: (value: string) => void
+  min?: string
+  max?: string
+  placeholder: string
+  'aria-label': string
+}) {
+  const { lang, t } = useUI()
+  const { open, setOpen, show, placement, trigger, popover } = usePopover<HTMLButtonElement, HTMLDivElement>(
+    340,
+    400,
+  )
+  const [cursor, setCursor] = useState(() => new Date())
+  const grid = useRef<HTMLDivElement>(null)
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US'
+  const today = isoDate(new Date())
+  const focused = isoDate(cursor)
+  const allowed = (day: string) => (!min || day >= min) && (!max || day <= max)
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
+  const start = addDays(first, -((first.getDay() + 6) % 7))
+  const days = Array.from({ length: 42 }, (_, i) => addDays(start, i))
+  const close = () => {
+    setOpen(false)
+    trigger.current?.focus()
+  }
+  const pick = (day: string) => {
+    if (!allowed(day)) return
+    close()
+    if (day !== value) onChange(day)
+  }
+  useEffect(() => {
+    if (open) grid.current?.querySelector<HTMLButtonElement>('[tabindex="0"]')?.focus({ preventScroll: true })
+  }, [open, focused])
+  const label = value
+    ? parseDate(value).toLocaleDateString(locale, {
+        year: value.startsWith(String(new Date().getFullYear())) ? undefined : 'numeric',
+        month: 'short',
+        day: 'numeric',
+      })
+    : placeholder
+  const gridKeys = (event: ReactKeyboardEvent) => {
+    const steps: Record<string, () => Date> = {
+      ArrowLeft: () => addDays(cursor, -1),
+      ArrowRight: () => addDays(cursor, 1),
+      ArrowUp: () => addDays(cursor, -7),
+      ArrowDown: () => addDays(cursor, 7),
+      PageUp: () => addMonths(cursor, -1),
+      PageDown: () => addMonths(cursor, 1),
+      Home: () => addDays(cursor, -((cursor.getDay() + 6) % 7)),
+      End: () => addDays(cursor, 6 - ((cursor.getDay() + 6) % 7)),
+    }
+    if (!(event.key in steps)) return
+    event.preventDefault()
+    setCursor(steps[event.key]())
+  }
+  return (
+    <div className="select date-picker">
+      <button
+        ref={trigger}
+        type="button"
+        className={`select-trigger${open ? ' open' : ''}${value ? '' : ' placeholder'}`}
+        aria-label={value ? `${ariaLabel}: ${label}` : ariaLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => {
+          if (open) return setOpen(false)
+          setCursor(value ? parseDate(value) : new Date())
+          show()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' && !open) {
+            e.preventDefault()
+            setCursor(value ? parseDate(value) : new Date())
+            show()
+          }
+        }}
+      >
+        <CalendarDays size={14} className="select-chevron" aria-hidden />
+        <span className="select-value">{label}</span>
+      </button>
+      {open &&
+        placement &&
+        createPortal(
+          <div
+            ref={popover}
+            role="dialog"
+            aria-label={ariaLabel}
+            className={`select-menu calendar${placement.top === undefined ? ' up' : ''}`}
+            style={{ ...popoverStyle(placement), minWidth: undefined }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                e.stopPropagation()
+                close()
+              }
+            }}
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node) && e.relatedTarget !== trigger.current)
+                setOpen(false)
+            }}
+          >
+            <header>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t('上个月', 'Previous month')}
+                onClick={() => setCursor(addMonths(cursor, -1))}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <strong aria-live="polite">
+                {cursor.toLocaleDateString(locale, { year: 'numeric', month: 'long' })}
+              </strong>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t('下个月', 'Next month')}
+                onClick={() => setCursor(addMonths(cursor, 1))}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </header>
+            <div className="calendar-grid" ref={grid} role="grid" onKeyDown={gridKeys}>
+              {(lang === 'zh' ? '一二三四五六日'.split('') : ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']).map(
+                (name) => (
+                  <span key={name} className="calendar-weekday" aria-hidden>
+                    {name}
+                  </span>
+                ),
+              )}
+              {days.map((date) => {
+                const day = isoDate(date)
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    tabIndex={day === focused ? 0 : -1}
+                    disabled={!allowed(day)}
+                    aria-pressed={day === value}
+                    aria-current={day === today ? 'date' : undefined}
+                    aria-label={date.toLocaleDateString(locale, { dateStyle: 'full' })}
+                    className={`calendar-day${date.getMonth() === cursor.getMonth() ? '' : ' outside'}`}
+                    onClick={() => pick(day)}
+                  >
+                    {date.getDate()}
+                  </button>
+                )
+              })}
+            </div>
+            <footer>
+              <button
+                type="button"
+                className="text-button"
+                disabled={!allowed(today)}
+                onClick={() => pick(today)}
+              >
+                {t('今天', 'Today')}
+              </button>
+              <button
+                type="button"
+                className="text-button"
+                disabled={!value}
+                onClick={() => {
+                  close()
+                  onChange('')
+                }}
+              >
+                {t('清除', 'Clear')}
+              </button>
+            </footer>
+          </div>,
           document.body,
         )}
     </div>
