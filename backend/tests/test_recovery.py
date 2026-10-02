@@ -4,14 +4,13 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from class_copilot import audio, context
+from class_copilot.domain import Fault
 from class_copilot.main import create_app
 from class_copilot.persistence import Database
 from class_copilot.service import Service
 from conftest import FakeHardware, FakeProvider, Harness
 from fastapi.testclient import TestClient
-
-from class_copilot import audio, context
-from class_copilot.domain import Fault
 
 
 def test_model_failure_does_not_stop_audio_and_stop_releases_slot(h):

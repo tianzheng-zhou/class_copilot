@@ -3,10 +3,9 @@
 import json
 from pathlib import Path
 
+from class_copilot.domain import Settings
 from class_copilot.dto import PublicTypes
 from class_copilot.main import app
-
-from class_copilot.domain import Settings
 
 schema = app.openapi()
 models = PublicTypes.model_json_schema(ref_template="#/components/schemas/{model}")

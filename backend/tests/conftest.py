@@ -5,10 +5,9 @@ import wave
 from uuid import uuid4
 
 import pytest
+from class_copilot.domain import Fault
 from class_copilot.main import create_app
 from fastapi.testclient import TestClient
-
-from class_copilot.domain import Fault
 
 
 class FakeProvider:

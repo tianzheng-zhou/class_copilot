@@ -4,10 +4,9 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from class_copilot.domain import Fault, Settings
 from class_copilot.persistence import events
 from class_copilot.provider import Provider
-
-from class_copilot.domain import Fault, Settings
 
 
 @pytest.mark.asyncio
