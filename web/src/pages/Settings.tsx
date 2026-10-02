@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useBlocker } from 'react-router-dom'
 import { Check, KeyRound, Mic, Plus, RefreshCw, Save, Settings2, Trash2 } from 'lucide-react'
 import { api, type Accepted, type Course, type Device, type Job, type Page, type Settings } from '../api'
-import { Badge, Empty, ErrorBox, Loading, Modal, useAction, useUI } from '../ui'
+import { Badge, Empty, ErrorBox, Loading, Modal, Select, useAction, useUI } from '../ui'
 import { LiveContext } from '../main'
 
 type PublicSettings = Settings & { revision: number; id: string; effective: Record<string, string> }
@@ -164,19 +164,21 @@ export function SettingsPage() {
         <div className="form-grid">
           <label>
             {t('工作空间区域', 'Workspace region')}
-            <select value={form.provider.region} onChange={(e) => set('provider', 'region', e.target.value)}>
-              <option value="">{t('请选择实际区域', 'Select your actual region')}</option>
-              {[
-                'cn-beijing',
-                'ap-southeast-1',
-                'cn-hongkong',
-                'ap-northeast-1',
-                'eu-central-1',
-                'us-east-1',
-              ].map((region) => (
-                <option key={region}>{region}</option>
-              ))}
-            </select>
+            <Select
+              value={form.provider.region}
+              onChange={(value) => set('provider', 'region', value)}
+              options={[
+                { value: '', label: t('请选择实际区域', 'Select your actual region') },
+                ...[
+                  'cn-beijing',
+                  'ap-southeast-1',
+                  'cn-hongkong',
+                  'ap-northeast-1',
+                  'eu-central-1',
+                  'us-east-1',
+                ].map((region) => ({ value: region, label: region })),
+              ]}
+            />
           </label>
           <label>
             {t('工作空间兼容地址', 'Workspace compatible URL')}
@@ -299,38 +301,40 @@ export function SettingsPage() {
         <div className="form-grid">
           <label>
             {t('默认音源', 'Default input')}
-            <select
+            <Select
               value={form.audio.default_kind}
-              onChange={(e) => {
-                set('audio', 'default_kind', e.target.value)
+              onChange={(value) => {
+                set('audio', 'default_kind', value)
                 set('audio', 'default_device_id', null)
               }}
-            >
-              <option value="microphone">{t('麦克风', 'Microphone')}</option>
-              <option value="loopback">{t('系统声音', 'System audio')}</option>
-            </select>
+              options={[
+                { value: 'microphone', label: t('麦克风', 'Microphone') },
+                { value: 'loopback', label: t('系统声音', 'System audio') },
+              ]}
+            />
           </label>
           <label>
             {t('默认设备', 'Default device')}
-            <select
+            <Select
               value={form.audio.default_device_id || ''}
-              onChange={(e) => set('audio', 'default_device_id', e.target.value || null)}
-            >
-              <option value="">
-                {t('系统默认（开始前解析具体设备）', 'System default (resolved before recording)')}
-              </option>
-              {form.audio.default_device_id &&
-                !devices.data?.devices.some((d) => d.id === form.audio.default_device_id) && (
-                  <option value={form.audio.default_device_id}>
-                    {t('原设备已不可用，请重新选择', 'Previous device unavailable; choose again')}
-                  </option>
-                )}
-              {devices.data?.devices.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => set('audio', 'default_device_id', value || null)}
+              options={[
+                {
+                  value: '',
+                  label: t('系统默认（开始前解析具体设备）', 'System default (resolved before recording)'),
+                },
+                ...(form.audio.default_device_id &&
+                !devices.data?.devices.some((d) => d.id === form.audio.default_device_id)
+                  ? [
+                      {
+                        value: form.audio.default_device_id,
+                        label: t('原设备已不可用，请重新选择', 'Previous device unavailable; choose again'),
+                      },
+                    ]
+                  : []),
+                ...(devices.data?.devices.map((d) => ({ value: d.id, label: d.label })) ?? []),
+              ]}
+            />
           </label>
           <label>
             {t('自动停止分钟数', 'Auto stop minutes')}
@@ -345,14 +349,15 @@ export function SettingsPage() {
           </label>
           <label>
             {t('识别语言', 'Speech language')}
-            <select
+            <Select
               value={form.transcription.language}
-              onChange={(e) => set('transcription', 'language', e.target.value)}
-            >
-              <option value="mixed">{t('中英混合，保留原语种', 'Mixed, preserve original language')}</option>
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-            </select>
+              onChange={(value) => set('transcription', 'language', value)}
+              options={[
+                { value: 'mixed', label: t('中英混合，保留原语种', 'Mixed, preserve original language') },
+                { value: 'zh', label: '中文' },
+                { value: 'en', label: 'English' },
+              ]}
+            />
           </label>
         </div>
         {devices.data?.unavailable_reason && (
@@ -404,50 +409,51 @@ export function SettingsPage() {
           {modelFields.map(([field, zh, en]) => (
             <label key={field}>
               {t(zh, en)}
-              <select
+              <Select
                 value={form.models[field]}
                 disabled={field === 'transcription'}
-                onChange={(e) => set('models', field, e.target.value)}
-              >
-                {(field === 'transcription' ? ['qwen3.8-omni-flash'] : ['qwen3.8-flash', 'qwen3.8-max']).map(
-                  (model) => (
-                    <option key={model}>{model}</option>
-                  ),
-                )}
-              </select>
+                onChange={(value) => set('models', field, value)}
+                options={(field === 'transcription'
+                  ? ['qwen3.8-omni-flash']
+                  : ['qwen3.8-flash', 'qwen3.8-max']
+                ).map((model) => ({ value: model, label: model }))}
+              />
             </label>
           ))}
           <label>
             {t('生成语言', 'Generated content language')}
-            <select
+            <Select
               value={form.generation.language}
-              onChange={(e) => set('generation', 'language', e.target.value)}
-            >
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-              <option value="bilingual">{t('中英双语', 'Bilingual')}</option>
-            </select>
+              onChange={(value) => set('generation', 'language', value)}
+              options={[
+                { value: 'zh', label: '中文' },
+                { value: 'en', label: 'English' },
+                { value: 'bilingual', label: t('中英双语', 'Bilingual') },
+              ]}
+            />
           </label>
           <label>
             {t('默认答案样式', 'Default answer style')}
-            <select
+            <Select
               value={form.generation.default_style}
-              onChange={(e) => set('generation', 'default_style', e.target.value)}
-            >
-              <option value="brief">{t('简要', 'Brief')}</option>
-              <option value="detailed">{t('详细', 'Detailed')}</option>
-            </select>
+              onChange={(value) => set('generation', 'default_style', value)}
+              options={[
+                { value: 'brief', label: t('简要', 'Brief') },
+                { value: 'detailed', label: t('详细', 'Detailed') },
+              ]}
+            />
           </label>
           <label>
             {t('新课堂默认处理方式', 'New class processing mode')}
-            <select
+            <Select
               value={form.automation.default_mode}
-              onChange={(e) => set('automation', 'default_mode', e.target.value)}
-            >
-              <option value="auto_answer">{t('自动问答', 'Auto answers')}</option>
-              <option value="detect_only">{t('仅检测', 'Detect only')}</option>
-              <option value="transcribe_only">{t('仅转写', 'Transcribe only')}</option>
-            </select>
+              onChange={(value) => set('automation', 'default_mode', value)}
+              options={[
+                { value: 'auto_answer', label: t('自动问答', 'Auto answers') },
+                { value: 'detect_only', label: t('仅检测', 'Detect only') },
+                { value: 'transcribe_only', label: t('仅转写', 'Transcribe only') },
+              ]}
+            />
           </label>
         </div>
         <details className="advanced">

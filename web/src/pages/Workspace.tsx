@@ -39,6 +39,7 @@ import {
   Loading,
   Markdown,
   Modal,
+  Select,
   activeStates,
   dateLabel,
   duration,
@@ -151,17 +152,15 @@ function QuestionCard({ question, onLocate }: { question: Question; onLocate: (i
       {shown ? (
         <>
           <div className="version-picker">
-            <select
+            <Select
               aria-label={t('答案版本', 'Answer version')}
               value={shown.id}
-              onChange={(e) => setVersion(e.target.value)}
-            >
-              {versions.map((v) => (
-                <option key={v.id} value={v.id}>
-                  v{v.version} · {v.style} · {v.language} · {v.state}
-                </option>
-              ))}
-            </select>
+              onChange={setVersion}
+              options={versions.map((v) => ({
+                value: v.id,
+                label: `v${v.version} · ${v.style} · ${v.language} · ${v.state}`,
+              }))}
+            />
           </div>
           <Generated value={shown} />
         </>
@@ -172,32 +171,35 @@ function QuestionCard({ question, onLocate }: { question: Question; onLocate: (i
       <details className="answer-options">
         <summary>{t('生成参考答案', 'Generate reference answer')}</summary>
         <div className="inline-options">
-          <select
+          <Select
             aria-label={t('答案详细程度', 'Answer style')}
             value={style}
-            onChange={(e) => setStyle(e.target.value)}
-          >
-            <option value="brief">{t('简要', 'Brief')}</option>
-            <option value="detailed">{t('详细', 'Detailed')}</option>
-          </select>
-          <select
+            onChange={setStyle}
+            options={[
+              { value: 'brief', label: t('简要', 'Brief') },
+              { value: 'detailed', label: t('详细', 'Detailed') },
+            ]}
+          />
+          <Select
             aria-label={t('答案语言', 'Answer language')}
             value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-          >
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-            <option value="bilingual">{t('中英双语', 'Bilingual')}</option>
-          </select>
-          <select
+            onChange={setLanguage}
+            options={[
+              { value: 'zh', label: '中文' },
+              { value: 'en', label: 'English' },
+              { value: 'bilingual', label: t('中英双语', 'Bilingual') },
+            ]}
+          />
+          <Select
             aria-label={t('答案模型', 'Answer model')}
             value={role}
-            onChange={(e) => setRole(e.target.value)}
-          >
-            <option value="">{t('默认模型', 'Default model')}</option>
-            <option value="fast">{t('快速', 'Fast')}</option>
-            <option value="quality">{t('质量', 'Quality')}</option>
-          </select>
+            onChange={setRole}
+            options={[
+              { value: '', label: t('默认模型', 'Default model') },
+              { value: 'fast', label: t('快速', 'Fast') },
+              { value: 'quality', label: t('质量', 'Quality') },
+            ]}
+          />
         </div>
         <button
           disabled={busy || !!active}
@@ -232,6 +234,7 @@ function SourceCard({
   const { t } = useUI()
   const { run, busy } = useAction()
   const [minutes, setMinutes] = useState('')
+  const [speed, setSpeed] = useState('1')
   const playable = source.assets.find((a) => a.role === 'playback')
   const original = source.assets.find((a) => a.role === 'original')
   const recording = ['capturing', 'preparing', 'finalizing'].includes(source.capture_state)
@@ -261,17 +264,15 @@ function SourceCard({
             preload="none"
             src={playable.url}
           />
-          <select
+          <Select
             aria-label={t('播放速度', 'Playback speed')}
-            defaultValue="1"
-            onChange={(e) => {
-              if (playRefs.current[source.id]) playRefs.current[source.id]!.playbackRate = +e.target.value
+            value={speed}
+            onChange={(value) => {
+              setSpeed(value)
+              if (playRefs.current[source.id]) playRefs.current[source.id]!.playbackRate = +value
             }}
-          >
-            {[0.75, 1, 1.25, 1.5, 2].map((n) => (
-              <option key={n}>{n}</option>
-            ))}
-          </select>
+            options={['0.75', '1', '1.25', '1.5', '2'].map((n) => ({ value: n, label: `${n}×` }))}
+          />
         </div>
       ) : (
         <p className="muted">
@@ -517,19 +518,18 @@ export function Workspace() {
       <div className="work-toolbar">
         <label className="mode-select">
           {t('处理方式', 'Processing')}
-          <select
+          <Select
             value={lesson.automation_mode}
             disabled={busy}
-            onChange={(e) =>
-              void run(() =>
-                api(`/lessons/${id}/automation`, 'PUT', { mode: e.target.value }, lesson.revision),
-              )
+            onChange={(mode) =>
+              void run(() => api(`/lessons/${id}/automation`, 'PUT', { mode }, lesson.revision))
             }
-          >
-            <option value="auto_answer">{t('自动问答', 'Auto answers')}</option>
-            <option value="detect_only">{t('仅检测问题', 'Detect questions')}</option>
-            <option value="transcribe_only">{t('仅转写', 'Transcribe only')}</option>
-          </select>
+            options={[
+              { value: 'auto_answer', label: t('自动问答', 'Auto answers') },
+              { value: 'detect_only', label: t('仅检测问题', 'Detect questions') },
+              { value: 'transcribe_only', label: t('仅转写', 'Transcribe only') },
+            ]}
+          />
         </label>
         <div className="record-status">
           {current ? (
@@ -802,14 +802,15 @@ export function Workspace() {
               }}
             />
             <div className="composer-options">
-              <select
+              <Select
                 value={role}
-                onChange={(e) => setRole(e.target.value)}
+                onChange={setRole}
                 aria-label={t('聊天模型', 'Chat model')}
-              >
-                <option value="fast">{t('快速', 'Fast')}</option>
-                <option value="quality">{t('质量', 'Quality')}</option>
-              </select>
+                options={[
+                  { value: 'fast', label: t('快速', 'Fast') },
+                  { value: 'quality', label: t('质量', 'Quality') },
+                ]}
+              />
               <label className="checkbox-label">
                 <input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} />
                 {t('思考', 'Thinking')}
@@ -1033,32 +1034,37 @@ export function Workspace() {
             </div>
             <label>
               {t('音频来源', 'Audio input')}
-              <select
+              <Select
                 value={kind}
-                onChange={(e) => {
-                  setKind(e.target.value)
+                onChange={(value) => {
+                  setKind(value)
                   setDevice('')
                 }}
-              >
-                <option value="microphone">{t('麦克风', 'Microphone')}</option>
-                <option value="loopback">{t('系统声音', 'System audio')}</option>
-              </select>
+                options={[
+                  { value: 'microphone', label: t('麦克风', 'Microphone') },
+                  { value: 'loopback', label: t('系统声音', 'System audio') },
+                ]}
+              />
             </label>
             <label>
               {t('实际设备', 'Actual device')}
-              <select required value={device} onChange={(e) => setDevice(e.target.value)}>
-                <option value="">{t('请选择设备', 'Choose a device')}</option>
-                {device && devices.data && !devices.data.devices.some((d) => d.id === device) && (
-                  <option value={device}>
-                    {t('原设备不可用，请重新选择', 'Previous device unavailable; select again')}
-                  </option>
-                )}
-                {devices.data?.devices.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
+              <Select
+                required
+                value={device}
+                onChange={setDevice}
+                options={[
+                  { value: '', label: t('请选择设备', 'Choose a device') },
+                  ...(device && devices.data && !devices.data.devices.some((d) => d.id === device)
+                    ? [
+                        {
+                          value: device,
+                          label: t('原设备不可用，请重新选择', 'Previous device unavailable; select again'),
+                        },
+                      ]
+                    : []),
+                  ...(devices.data?.devices.map((d) => ({ value: d.id, label: d.label })) ?? []),
+                ]}
+              />
             </label>
             {devices.data?.unavailable_reason && (
               <p className="warning-text">{devices.data.unavailable_reason}</p>
@@ -1108,18 +1114,17 @@ export function Workspace() {
           </p>
           <label>
             {t('处理方式', 'Processing mode')}
-            <select
+            <Select
               value={lesson.automation_mode}
-              onChange={(e) =>
-                void run(() =>
-                  api(`/lessons/${id}/automation`, 'PUT', { mode: e.target.value }, lesson.revision),
-                )
+              onChange={(mode) =>
+                void run(() => api(`/lessons/${id}/automation`, 'PUT', { mode }, lesson.revision))
               }
-            >
-              <option value="auto_answer">{t('自动问答', 'Auto answers')}</option>
-              <option value="detect_only">{t('仅检测', 'Detect only')}</option>
-              <option value="transcribe_only">{t('仅转写', 'Transcribe only')}</option>
-            </select>
+              options={[
+                { value: 'auto_answer', label: t('自动问答', 'Auto answers') },
+                { value: 'detect_only', label: t('仅检测', 'Detect only') },
+                { value: 'transcribe_only', label: t('仅转写', 'Transcribe only') },
+              ]}
+            />
           </label>
           <label className="checkbox-label">
             <input type="checkbox" checked={autoSummary} onChange={(e) => setAutoSummary(e.target.checked)} />

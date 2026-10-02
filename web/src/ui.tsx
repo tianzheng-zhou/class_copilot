@@ -1,5 +1,16 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { LoaderCircle, X, AlertCircle } from 'lucide-react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react'
+import { createPortal } from 'react-dom'
+import { LoaderCircle, X, AlertCircle, Check, ChevronDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQueryClient } from '@tanstack/react-query'
@@ -103,7 +114,7 @@ export function Modal({
     const root = container.current
     const controls = () =>
       root?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href]',
+        'button:not([disabled]),input:not([disabled]):not([tabindex="-1"]),select:not([disabled]),textarea:not([disabled]),a[href]',
       )
     const elements = controls()
     ;(root?.querySelector<HTMLElement>('[autofocus]') || elements?.[1] || elements?.[0])?.focus()
@@ -149,6 +160,198 @@ export function Modal({
         </header>
         {children}
       </section>
+    </div>
+  )
+}
+export type SelectOption = { value: string; label: string }
+type MenuPlacement = { left: number; width: number; top?: number; bottom?: number; maxHeight: number }
+export function Select({
+  value,
+  options,
+  onChange,
+  disabled,
+  required,
+  className,
+  'aria-label': ariaLabel,
+}: {
+  value: string
+  options: SelectOption[]
+  onChange: (value: string) => void
+  disabled?: boolean
+  required?: boolean
+  className?: string
+  'aria-label'?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(0)
+  const [placement, setPlacement] = useState<MenuPlacement>()
+  const trigger = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLUListElement>(null)
+  const typed = useRef({ text: '', at: 0 })
+  const id = useId()
+  const selected = options.findIndex((o) => o.value === value)
+  const place = () => {
+    const box = trigger.current?.getBoundingClientRect()
+    if (!box) return
+    const below = innerHeight - box.bottom - 12,
+      above = box.top - 12,
+      up = below < 220 && above > below
+    setPlacement({
+      left: box.left,
+      width: box.width,
+      top: up ? undefined : box.bottom + 5,
+      bottom: up ? innerHeight - box.top + 5 : undefined,
+      maxHeight: Math.max(120, Math.min(300, up ? above : below)),
+    })
+  }
+  const show = (index = selected) => {
+    if (disabled || !options.length) return
+    place()
+    setActive(Math.max(0, index))
+    setOpen(true)
+  }
+  const choose = (index: number) => {
+    const option = options[index]
+    setOpen(false)
+    trigger.current?.focus()
+    if (option && option.value !== value) onChange(option.value)
+  }
+  useLayoutEffect(() => {
+    const node = menu.current
+    if (!open || !node || !placement) return
+    const overflow = placement.left + node.offsetWidth - (innerWidth - 8)
+    node.style.left = `${Math.max(8, placement.left - Math.max(0, overflow))}px`
+  }, [open, placement])
+  useEffect(() => {
+    if (!open) return
+    const outside = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!trigger.current?.contains(target) && !menu.current?.contains(target)) setOpen(false)
+    }
+    const reposition = (event: Event) => {
+      if (event.target !== menu.current) place()
+    }
+    document.addEventListener('pointerdown', outside)
+    window.addEventListener('scroll', reposition, true)
+    window.addEventListener('resize', place)
+    return () => {
+      document.removeEventListener('pointerdown', outside)
+      window.removeEventListener('scroll', reposition, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [open])
+  useEffect(() => {
+    if (open) menu.current?.children[active]?.scrollIntoView({ block: 'nearest' })
+  }, [open, active])
+  const typeahead = (key: string) => {
+    const now = Date.now()
+    typed.current = {
+      text: (now - typed.current.at < 700 ? typed.current.text : '') + key.toLowerCase(),
+      at: now,
+    }
+    const start = open ? active : selected
+    const order = options.map((_, i) => (start + 1 + i) % options.length)
+    const match = order.find((i) => options[i].label.toLowerCase().startsWith(typed.current.text))
+    if (match !== undefined) show(match)
+  }
+  const keyDown = (event: ReactKeyboardEvent) => {
+    const last = options.length - 1
+    const moves: Record<string, number> = {
+      ArrowDown: Math.min(last, active + 1),
+      ArrowUp: Math.max(0, active - 1),
+      Home: 0,
+      End: last,
+      PageDown: Math.min(last, active + 8),
+      PageUp: Math.max(0, active - 8),
+    }
+    if (!open) {
+      if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) {
+        event.preventDefault()
+        show()
+      } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey)
+        typeahead(event.key)
+      return
+    }
+    if (event.key in moves) {
+      event.preventDefault()
+      setActive(moves[event.key])
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      choose(active)
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
+    } else if (event.key === 'Tab') setOpen(false)
+    else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) typeahead(event.key)
+  }
+  return (
+    <div className={`select${className ? ` ${className}` : ''}`}>
+      <button
+        ref={trigger}
+        type="button"
+        role="combobox"
+        className={`select-trigger${open ? ' open' : ''}`}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? `${id}-menu` : undefined}
+        aria-activedescendant={open ? `${id}-${active}` : undefined}
+        aria-required={required || undefined}
+        disabled={disabled}
+        onClick={() => (open ? setOpen(false) : show())}
+        onKeyDown={keyDown}
+        onKeyUp={(e) => e.key === ' ' && e.preventDefault()}
+      >
+        <span className="select-value">{options[selected]?.label ?? ''}</span>
+        <ChevronDown size={15} className="select-chevron" aria-hidden />
+      </button>
+      {required && (
+        <input
+          className="select-validation"
+          tabIndex={-1}
+          aria-hidden
+          required
+          value={value}
+          onChange={() => {}}
+          onFocus={() => trigger.current?.focus()}
+        />
+      )}
+      {open &&
+        placement &&
+        createPortal(
+          <ul
+            ref={menu}
+            id={`${id}-menu`}
+            role="listbox"
+            aria-label={ariaLabel}
+            className={`select-menu${placement.top === undefined ? ' up' : ''}`}
+            style={{
+              left: placement.left,
+              top: placement.top,
+              bottom: placement.bottom,
+              minWidth: placement.width,
+              maxHeight: placement.maxHeight,
+            }}
+          >
+            {options.map((option, index) => (
+              <li
+                key={option.value}
+                id={`${id}-${index}`}
+                role="option"
+                aria-selected={index === selected}
+                className={`select-option${index === active ? ' active' : ''}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseMove={() => index !== active && setActive(index)}
+                onClick={() => choose(index)}
+              >
+                <span>{option.label}</span>
+                {index === selected && <Check size={14} aria-hidden />}
+              </li>
+            ))}
+          </ul>,
+          document.body,
+        )}
     </div>
   )
 }

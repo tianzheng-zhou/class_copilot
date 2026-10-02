@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowUpRight, BookOpen, Plus, Search, MoreHorizontal, CalendarDays } from 'lucide-react'
 import { api, type Bootstrap, type Course, type Lesson, type Page } from '../api'
-import { useUI, useAction, Modal, Empty, Loading, ErrorBox, dateLabel, Badge } from '../ui'
+import { useUI, useAction, Modal, Empty, Loading, ErrorBox, dateLabel, Badge, Select } from '../ui'
 
 export function Library() {
   const { t, lang } = useUI()
@@ -96,18 +96,15 @@ export function Library() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <select
+        <Select
           aria-label={t('课程筛选', 'Filter course')}
           value={course}
-          onChange={(e) => setCourse(e.target.value)}
-        >
-          <option value="">{t('全部课程', 'All courses')}</option>
-          {courses.data?.items.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+          onChange={setCourse}
+          options={[
+            { value: '', label: t('全部课程', 'All courses') },
+            ...(courses.data?.items.map((c) => ({ value: c.id, label: c.name })) ?? []),
+          ]}
+        />
         <label className="date-filter">
           <CalendarDays size={16} />
           <input
@@ -202,14 +199,14 @@ export function Library() {
           >
             <label>
               {t('所属课程', 'Course')}
-              <select value={selected} onChange={(e) => setSelected(e.target.value)}>
-                <option value="">＋ {t('创建新课程', 'Create course')}</option>
-                {courses.data?.items.map((c) => (
-                  <option value={c.id} key={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <Select
+                value={selected}
+                onChange={setSelected}
+                options={[
+                  { value: '', label: `＋ ${t('创建新课程', 'Create course')}` },
+                  ...(courses.data?.items.map((c) => ({ value: c.id, label: c.name })) ?? []),
+                ]}
+              />
             </label>
             {!selected && (
               <label>

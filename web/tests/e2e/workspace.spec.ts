@@ -1,9 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
+async function choose(page: Page, name: string, option: string) {
+  await page.getByRole('combobox', { name, exact: true }).click()
+  await page.getByRole('option', { name: option, exact: true }).click()
+}
 async function createClass(page: Page, title: string) {
   await page.goto('/')
   await page.getByRole('button', { name: '新建课堂', exact: true }).click()
-  await page.getByRole('combobox', { name: '所属课程' }).selectOption('')
+  await choose(page, '所属课程', '＋ 创建新课程')
   await page.getByRole('textbox', { name: '新课程名称' }).fill(title + '课程')
   await page.getByRole('textbox', { name: '课堂名称（选填）' }).fill(title)
   await page.getByRole('button', { name: '创建课堂', exact: true }).click()
@@ -11,7 +15,7 @@ async function createClass(page: Page, title: string) {
 }
 async function configure(page: Page) {
   await page.goto('/settings')
-  await page.getByRole('combobox', { name: '工作空间区域' }).selectOption('cn-beijing')
+  await choose(page, '工作空间区域', 'cn-beijing')
   await page
     .getByRole('textbox', { name: '工作空间兼容地址' })
     .fill('https://dashscope.aliyuncs.com/compatible-mode/v1')
@@ -78,7 +82,7 @@ test('saved settings, record stop, post-class chat, summary, export and source p
 })
 test('unsaved settings can stay on page or discard on navigation', async ({ page }) => {
   await page.goto('/settings')
-  await page.getByRole('combobox', { name: '生成语言', exact: true }).selectOption('en')
+  await choose(page, '生成语言', 'English')
   await page.getByRole('link', { name: '我的课堂', exact: true }).click()
   await expect(page.getByRole('dialog', { name: '有未保存的更改' })).toBeVisible()
   await page.getByRole('button', { name: '继续编辑' }).click()
