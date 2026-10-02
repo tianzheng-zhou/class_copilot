@@ -28,6 +28,7 @@ test('empty startup, class creation, refresh, themes, English and narrow keyboar
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
   await createClass(page, '浏览器验收')
+  await expect(page).toHaveTitle('浏览器验收 · Class Copilot')
   await expect(page.getByRole('heading', { name: '课堂转写', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '课堂问答', exact: true })).toBeVisible()
   await page.getByRole('textbox', { name: '聊天消息' }).fill('尚未发送的草稿')
@@ -55,6 +56,7 @@ test('saved settings, record stop, post-class chat, summary, export and source p
   const dialog = page.getByRole('dialog', { name: '开始一次新录音' })
   await dialog.getByRole('button', { name: '开始录音', exact: true }).click()
   await expect(page.locator('.record-status').getByText('录音中', { exact: true })).toBeVisible()
+  await expect(page).toHaveTitle('● 录音中 · 完整流程 · Class Copilot')
   await page.waitForTimeout(500)
   await page.locator('.work-actions').getByRole('button', { name: '停止采集' }).click()
   await expect(page.getByText('这是课堂内容：为什么矩阵乘法不满足交换律？').first()).toBeVisible({
@@ -82,6 +84,7 @@ test('saved settings, record stop, post-class chat, summary, export and source p
 })
 test('unsaved settings can stay on page or discard on navigation', async ({ page }) => {
   await page.goto('/settings')
+  await expect(page).toHaveTitle('设置与课程 · Class Copilot')
   await choose(page, '生成语言', 'English')
   await page.getByRole('link', { name: '我的课堂', exact: true }).click()
   await expect(page.getByRole('dialog', { name: '有未保存的更改' })).toBeVisible()
@@ -90,6 +93,7 @@ test('unsaved settings can stay on page or discard on navigation', async ({ page
   await page.getByRole('link', { name: '我的课堂', exact: true }).click()
   await page.getByRole('button', { name: '放弃并离开' }).click()
   await expect(page).toHaveURL('http://127.0.0.1:29039/')
+  await expect(page).toHaveTitle('我的课堂 · Class Copilot')
 })
 
 test('upload, confirm analysis, refresh, and synchronize another tab', async ({ page, context }) => {

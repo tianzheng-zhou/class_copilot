@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useBlocker } from 'react-router-dom'
 import { Check, KeyRound, Mic, Plus, RefreshCw, Save, Settings2, Trash2 } from 'lucide-react'
 import { api, type Accepted, type Course, type Device, type Job, type Page, type Settings } from '../api'
-import { Badge, Empty, ErrorBox, Loading, Modal, Select, useAction, useUI } from '../ui'
+import { Badge, Empty, ErrorBox, Loading, Modal, Select, useAction, usePageTitle, useUI } from '../ui'
 import { LiveContext } from '../main'
 
 type PublicSettings = Settings & { revision: number; id: string; effective: Record<string, string> }
@@ -22,6 +22,7 @@ function configOnly(value: PublicSettings): Settings {
 }
 export function SettingsPage() {
   const { t, notify } = useUI()
+  usePageTitle(t('设置与课程', 'Settings & courses'))
   const { run, busy } = useAction()
   const live = useContext(LiveContext)
   const query = useQuery({ queryKey: ['settings'], queryFn: () => api<PublicSettings>('/settings') })

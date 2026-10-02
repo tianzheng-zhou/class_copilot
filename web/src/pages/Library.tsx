@@ -14,10 +14,12 @@ import {
   Badge,
   DatePicker,
   Select,
+  usePageTitle,
 } from '../ui'
 
 export function Library() {
   const { t, lang } = useUI()
+  usePageTitle(t('我的课堂', 'My classes'))
   const { run, busy } = useAction()
   const navigate = useNavigate()
   const [course, setCourse] = useState(''),

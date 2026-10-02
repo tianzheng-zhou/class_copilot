@@ -30,8 +30,17 @@ export const UIContext = createContext<{
   lang: Language
   t: (zh: string, en: string) => string
   notify: (message: string, error?: boolean) => void
-}>({ lang: 'zh', t: (zh) => zh, notify: () => {} })
+  setTitle: (title: string | undefined) => void
+}>({ lang: 'zh', t: (zh) => zh, notify: () => {}, setTitle: () => {} })
 export const useUI = () => useContext(UIContext)
+/** Sets the page part of the browser tab title; the app shell adds the product name and live-audio marker. */
+export function usePageTitle(title: string | undefined) {
+  const { setTitle } = useUI()
+  useEffect(() => {
+    setTitle(title)
+    return () => setTitle(undefined)
+  }, [title, setTitle])
+}
 export function useAction() {
   const [busy, setBusy] = useState(false)
   const { notify, lang } = useUI()

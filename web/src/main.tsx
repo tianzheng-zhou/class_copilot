@@ -4,7 +4,7 @@ import { createBrowserRouter, Link, NavLink, Outlet, RouterProvider } from 'reac
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BookOpen, Settings as SettingsIcon, Sun, Moon, Monitor, Square, X } from 'lucide-react'
 import { api, setCsrf, type Bootstrap } from './api'
-import { UIContext, type Language, useUI } from './ui'
+import { UIContext, type Language, usePageTitle, useUI } from './ui'
 import { Library } from './pages/Library'
 import { Workspace } from './pages/Workspace'
 import { SettingsPage } from './pages/Settings'
@@ -36,6 +36,7 @@ function App() {
   const [theme, setTheme] = useState(localStorage.getItem('cc.next.theme') || 'system')
   const [toasts, setToasts] = useState<{ id: number; text: string; error: boolean }[]>([])
   const [live, setLive] = useState<Record<string, LiveEvent>>({})
+  const [pageTitle, setPageTitle] = useState<string>()
   const [connected, setConnected] = useState(true)
   const query = useQueryClient()
   const bootstrap = useQuery({
@@ -123,8 +124,17 @@ function App() {
     setTimeout(() => setToasts((old) => old.filter((x) => x.id !== id)), 8000)
   }
   const audio = bootstrap.data?.active_audio
+  useEffect(() => {
+    document.title =
+      (audio ? '● ' : '') +
+      (pageTitle
+        ? `${pageTitle} · Class Copilot`
+        : `Class Copilot · ${t('课堂工作台', 'Classroom workspace')}`)
+    // t changes identity every render; lang covers it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(audio), pageTitle, lang])
   return (
-    <UIContext.Provider value={{ lang, t, notify }}>
+    <UIContext.Provider value={{ lang, t, notify, setTitle: setPageTitle }}>
       <LiveContext.Provider value={live}>
         <div className="app-shell">
           <aside className="sidebar">
@@ -229,6 +239,7 @@ function App() {
 }
 function NotFound() {
   const { t } = useUI()
+  usePageTitle(t('页面不存在', 'Page not found'))
   return (
     <div className="page">
       <h1>404</h1>

@@ -47,6 +47,7 @@ import {
   dateLabel,
   duration,
   useAction,
+  usePageTitle,
   useUI,
 } from '../ui'
 import { LiveContext } from '../main'
@@ -507,6 +508,13 @@ export function Workspace() {
   const current = sources.find((s) => ['capturing', 'preparing', 'finalizing'].includes(s.capture_state))
   const chatBusy = jobs.data?.items.some((j) => j.kind === 'chat_reply' && activeStates.includes(j.state))
   const lesson = snapshot.data?.lesson
+  const lessonTitle =
+    lesson && (lesson.custom_title || `${lesson.course_name} · ${dateLabel(lesson.created_at, lang)}`)
+  usePageTitle(
+    lessonTitle && current?.capture_state === 'capturing'
+      ? `${t('录音中', 'Recording')} · ${lessonTitle}`
+      : lessonTitle,
+  )
   const select = (identity: string) =>
     setSelection((old) =>
       old.includes(identity) ? old.filter((x) => x !== identity) : [...old, identity].slice(-100),
@@ -555,7 +563,7 @@ export function Workspace() {
             <ArrowLeft size={15} />
             {lesson.course_name}
           </Link>
-          <h1>{lesson.custom_title || `${lesson.course_name} · ${dateLabel(lesson.created_at, lang)}`}</h1>
+          <h1>{lessonTitle}</h1>
         </div>
         <div className="work-actions">
           <a
